@@ -36,7 +36,7 @@
 
     // File service
     interface FileService {
-        FileHandler* openFile(string mediaId, string userToken) throws Unauthorized;
+        FileHandler* openFile(string mediaId, string userToken) throws Unauthorized, WrongMediaId;
         string uploadFile(FileUploader* uploader, string adminToken) throws Unauthorized;
         void removeFile(string mediaId, string adminToken) throws Unauthorized, WrongMediaId;
     };
@@ -62,8 +62,8 @@
         StringList getTilesByName(string name, bool exact);
         StringList getTilesByTags(StringList tags, bool includeAllTags, string userToken) throws Unauthorized;
 
-        void newMedia(string mediaId);
-        void removeMedia(string mediaId);
+        void newMedia(string mediaId, FileService* provider);
+        void removeMedia(string mediaId, FileService* provider);
         void renameTile(string mediaId, string name, string adminToken) throws Unauthorized, WrongMediaId;
 
         void addTags(string mediaId, StringList tags, string userToken) throws Unauthorized, WrongMediaId;
