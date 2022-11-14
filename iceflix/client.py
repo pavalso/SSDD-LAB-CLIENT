@@ -1,19 +1,32 @@
-import Ice
+'''
+    Iceflix client.
+    Developed by Pablo Valverde Soriano
+'''
+
+# If not disable, pylint will raise a warning on Ice exceptions.
+# pylint: disable=no-name-in-module
+# pylint: disable=broad-except
+
+import sys
 import logging
 import shlex
 
 try:
     import commands
 except ImportError:
-    import iceflix.commands as commands
+    from iceflix import commands
+
+from Ice import ConnectionRefusedException
 
 
 def program_loop():
+    '''Lets the user authenticate and starts the mini-shell'''
 
     commands.login()
 
     while True:
-        command = input('{0}{1}> '.format(commands.current_session.user, f'@{commands.selected_title.info.name}' if commands.selected_title else ''))
+        current_title = f'@{commands.selected_title.info.name}' if commands.selected_title else ''
+        command = input(f'{commands.current_session.user}{current_title}> ')
         args = shlex.split(command)
 
         try:
@@ -24,29 +37,34 @@ def program_loop():
             except (KeyboardInterrupt, EOFError):
                 print('')
         except Exception as error:
-            print('An unexpected error has occurred, see the logs for a detailed description')
+            print(
+                'An unexpected error has occurred, see the logs for a detailed description')
             logging.exception(error)
 
+
 def client_main():
-    main_proxy = 'MainAdapter:tcp -p 9999'#input('Main proxy: '))
+    '''Entry point of the program'''
+    main_proxy = 'MainAdapter:tcp -p 9999'  # input('Main proxy: '))
     try:
         try:
             commands.initialize_program(main_proxy)
-        except Ice.ConnectionRefusedException:
+        except ConnectionRefusedException:
             print('The main server is disconnected, exiting...')
-            logging.error(f"Couldn't stablish a connection with the main server")
-            exit(111)
+            logging.error(
+                "Couldn't stablish a connection with the main server")
+            sys.exit(111)
 
         commands.show_logo()
 
         try:
             program_loop()
-        except Ice.ConnectionRefusedException:
+        except ConnectionRefusedException:
             logging.error('Connection to the server lost')
     except (KeyboardInterrupt, EOFError):
         pass
 
     commands.shutdown()
+
 
 if __name__ == '__main__':
     client_main()
