@@ -382,9 +382,9 @@ use the command 'logout' and authenticate in order to use it'''
     parsers.cat_name.set_defaults(search_func=search_name)
     parsers.cat_tags.set_defaults(search_func=search_tags)
 
-    @cmd2.with_argparser(parsers.tags_parser)
+    @cmd2.with_argparser(parsers.selected_base)
     @need_creds
-    def do_tags(self, args):
+    def do_selected(self, args):
         if not self.session.selected_title:
             self.perror("First you need to select a title using 'catalog use id'")
             return
@@ -406,12 +406,6 @@ use the command 'logout' and authenticate in order to use it'''
             self.perror('The selected media has been removed from the catalog server')
             self.session.cached_titles.pop(self.session.selected_title.id)
             self.session.selected_title = None
-
-    @cmd2.with_argparser(parsers.download_parser)
-    def do_download(self, args):
-        self.poutput('Downloading...')
-        sleep(2)
-        self.poutput('Done! 2.03214 seconds')
 
     def _generate_prompt(self):
         media = '-#'
