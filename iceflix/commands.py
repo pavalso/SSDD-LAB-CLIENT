@@ -13,14 +13,17 @@ from threading import Thread
 from dataclasses import dataclass, field
 from getpass import getpass
 from hashlib import sha256
-from time import sleep
+from time import sleep, perf_counter_ns
 
 
 MAX_TRIES = 3
 
 COLOR_SELECTED_TITLE = cmd2.ansi.RgbFg(200,200,200)
-COLOR_CONNECTED = cmd2.ansi.RgbFg(150,225,255)
+
+COLOR_CONNECTED = cmd2.ansi.RgbFg(0,225,255)
 COLOR_DISCONNECTED = cmd2.ansi.RgbFg(200,0,0)
+
+COLOR_ADMIN = cmd2.ansi.RgbFg(225,0,255)
 
 @dataclass
 class ActiveConnection:
@@ -44,9 +47,11 @@ class ActiveConnection:
                 sleep(5)
             except Ice.ConnectionRefusedException:
                 self.reachable = False
+            except Ice.ConnectTimeoutException:
+                self.reachable = False
             except Ice.CommunicatorDestroyedException:
                 return
-            if not last_val == self.reachable and self.terminal.terminal_lock.acquire():
+            if not last_val == self.reachable and self.terminal.terminal_lock.acquire(blocking=False):
                 self.terminal.async_update_prompt(self.terminal._generate_prompt())
                 self.terminal.terminal_lock.release()
                 last_val = self.reachable
@@ -69,6 +74,9 @@ class ActiveConnection:
             except Ice.ConnectionRefusedException:
                 self.terminal.perror('Connection refused')
                 return None
+            except Ice.ConnectTimeoutException:
+                self.terminal.perror('Connection timeout')
+                return None
             else:
                 return prx
 
@@ -90,6 +98,9 @@ class ActiveConnection:
             self.terminal.perror('Catalog services unavailable')
         except Ice.ConnectionRefusedException:
             self.terminal.perror('Connection refused')
+        except Ice.ConnectTimeoutException:
+            self.terminal.perror('Connection timedout')
+            return None
         else:
             return prx
 
@@ -114,10 +125,18 @@ class PartiaMedia:
             return None
 
         try:
-            self.media = catalog.getTile(self.id, conn.terminal.session.token)
-        except:
-            pass
+            media = catalog.getTile(self.id, conn.terminal.session.token)
+        except IceFlix.TemporaryUnavailable:
+            conn.terminal.perror("Can't fetch media rigth now, try again later")
+        except IceFlix.Unauthorized:
+            conn.terminal.perror("Your session has expired")
+        except IceFlix.WrongMediaId:
+            conn.terminal.perror('This media seems to not exist on the catalog server')
         else:
+            if media.info:
+                self.name = media.info.name
+                self.tags = media.info.tags
+            self.media = media
             return self.media
         return None
 
@@ -132,14 +151,47 @@ class Session:
     '''Stores the current session data'''
     user: str = None
     pass_hash: str = None
+    admin_pass: str = None
     token: str = None
     is_anon: bool = False
+    is_admin: bool = False
     selected_title : PartiaMedia = None
     cached_titles : dict[str, PartiaMedia] = field(default_factory=dict[str, PartiaMedia])
+
+    __cached_token : str = None
 
     def __post_init__(self):
         self.is_anon = self.token is None
         self.display_name = self.user if self.user else 'User'
+
+    def make_admin(self, admin_password : str):
+        self.__cached_token = self.token
+        self.admin_pass = admin_password
+        self.token = admin_password
+        self.is_admin = True
+
+    def make_user(self):
+        self.token = self.__cached_token
+        self.__cached_token = None
+        self.admin_pass = None
+        self.is_admin = False
+
+    def refresh(self, conn : ActiveConnection):
+        auth = conn.get_authenticator()
+
+        if not auth:
+            return None
+
+        try:
+            token = auth.refreshAuthorization(self.user, self.pass_hash)
+        except Ice.ConnectionRefusedException as conn_refused:
+            conn.terminal.perror('Lost connection to the authentication services')
+            conn.terminal.pexcept(conn_refused)
+        else:
+            self.token = token
+            self.is_anon = self.token is None
+            return self
+        return None 
 
 class Commands:
 
@@ -149,12 +201,15 @@ class Commands:
         
         communicator = Ice.initialize(sys.argv)
         base = communicator.stringToProxy(proxy)
+
+        if conn.proxy is None:
+            conn.proxy = proxy
         
         try:
             main = IceFlix.MainPrx.checkedCast(base)
         except Ice.ConnectionLostException:
             conn.terminal.perror('Connection lost')
-        except Ice.ConnectionTimeoutException:
+        except Ice.ConnectTimeoutException:
             conn.terminal.perror('Connection timeout') 
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
@@ -175,32 +230,22 @@ class Commands:
             conn.main = main
             conn.proxy = proxy
             conn.reachable = True
+            conn.terminal.prompt = conn.terminal._generate_prompt()
             return conn
         communicator.destroy()
         return None
 
     @staticmethod
     def login(conn : ActiveConnection):
-        auth = conn.get_authenticator()
-
-        if auth is None:
-            return None
-
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
         password_hash = sha256(password.encode('utf-8')).hexdigest()
 
         try:
-            token = auth.refreshAuthorization(username, password_hash)
+            conn.terminal.session = Session(username, password_hash)
+            conn.terminal.session.refresh(conn)
         except IceFlix.Unauthorized:
             conn.terminal.perror('Wrong username/password combination')
-        except Ice.ConnectionRefusedException as conn_refused:
-            conn.terminal.perror('Lost connection to the authentication services')
-            conn.terminal.pexcept(conn_refused)
-        else:
-            conn.terminal.session = Session(username, password_hash, token)
-            return conn.terminal.session
-        return None
 
     @staticmethod
     def get_catalog_name(conn : ActiveConnection, name : str, exact : bool):
@@ -282,6 +327,7 @@ class Commands:
     def add_tags(conn : ActiveConnection, tags : list[str]):
         catalog = conn.get_catalog()
         if not catalog:
+            conn.terminal.perror('No connection with the catalog services')
             return
         title = conn.terminal.session.selected_title
         if not title.tags:
@@ -296,10 +342,101 @@ class Commands:
             return
         catalog = conn.get_catalog()
         if not catalog:
+            conn.terminal.perror('No connection with the catalog services')
             return
         tags = list(set(title.tags).difference(tags))
         title.tags = None if not tags else tags
         catalog.removeTags(title.id, tags, conn.terminal.session.token)
+
+    def download(conn : ActiveConnection):
+        title = conn.terminal.session.selected_title
+        if not title:
+            conn.terminal.perror('No selected title')
+            return
+
+        media = title.fetch(conn)
+
+        if not media:
+            return
+
+        if not media.provider:
+            conn.terminal.perror("The title selected couldn't be downloaded, no provider associated")
+            return
+
+        session = conn.terminal.session
+        try:
+            handler = title.media.provider.openFile(title.id, session.token)
+        except IceFlix.Unauthorized:
+            conn.terminal.perror('Your session has expired')
+        except IceFlix.WrongMediaId:
+            conn.terminal.perror('The selected media seems to not exist on the catalog server')
+        else:
+            with conn.terminal.terminal_lock:
+                conn.terminal.poutput(f"Starting download...")
+                time_initial = perf_counter_ns()
+                with open(title.name, 'wb') as file:
+                    try:
+                        while True:
+                            try:
+                                raw = handler.receive(2048, session.token)
+                                if not raw:
+                                    break
+                                file.write(raw)
+                            except IceFlix.Unauthorized:
+                                session.refresh(conn)
+                    except IceFlix.Unauthorized:
+                        conn.terminal.perror('Your credentials changed. The download has been aborted')
+                    else:
+                        time_end = perf_counter_ns()
+                        final_time = time_end - time_initial
+                        conn.terminal.poutput(f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds")
+                        handler.close(session.token)
+                        return
+                    os.remove(title.name)
+        return
+
+    def admin(conn : ActiveConnection):
+        admin_pass = getpass('Admin password: ')
+        admin_sha256_pass = sha256(admin_pass.encode('utf-8')).hexdigest()
+        auth = conn.get_authenticator()
+        if not auth:
+            return
+        if not auth.isAdmin(admin_sha256_pass):
+            conn.terminal.perror('Wrong password')
+            return
+        conn.terminal.session.make_admin(admin_sha256_pass)
+        return conn.terminal.session
+
+    def add_user(conn : ActiveConnection, user : str, password : str):
+        auth = conn.get_authenticator()
+
+        if not auth:
+            return
+
+        password_hash = sha256(password.encode('utf-8')).hexdigest()
+        try:
+            auth.addUser(user, password_hash, conn.terminal.session.admin_pass)
+        except IceFlix.Unauthorized:
+            conn.terminal.perror('Invalid admin creedentials')
+        except IceFlix.TemporaryUnavailable:
+            conn.terminal.perror('Authentication services unavailable')
+        else:
+            conn.terminal.poutput(f'Added user {user}')
+
+    def remove_user(conn : ActiveConnection, user : str):
+        auth = conn.get_authenticator()
+
+        if not auth:
+            return
+
+        try:
+            auth.removeUser(user, conn.terminal.session.admin_pass)
+        except IceFlix.Unauthorized:
+            conn.terminal.perror('Invalid admin creedentials')
+        except IceFlix.TemporaryUnavailable:
+            conn.terminal.perror('Authentication services unavailable')
+        else:
+            conn.terminal.poutput(f'Removed user {user}')
 
 class cli_handler(cmd2.Cmd):
     '''Handles user input via an interactive command line'''
@@ -314,22 +451,35 @@ class cli_handler(cmd2.Cmd):
 
         self.debug = True
 
-        Commands.stablish_connection_main(self.active_conn, 'MainAdapter -t -e 1.1:tcp -h 192.168.1.204 -p 9999 -t 60000')#self.read_input('Connection proxy: '))
-        
         self.prompt = self._generate_prompt()
+
+    def connect(self, proxy):
+        Commands.stablish_connection_main(self.active_conn, proxy)
 
     @staticmethod
     def need_creds(func):
         '''If the user is anon, don't run the command and inform the user'''
         def check_creds(self, *args, **kwargs):
-            if self.session.is_anon:
+            if self.session.is_anon and not self.session.is_admin:
                 self.perror(
                     '''This command is only available for authenticated users
 use the command 'logout' and authenticate in order to use it'''
                 )
                 return
             func(self, *args, **kwargs)
+        check_creds.__name__ = func.__name__
         return check_creds
+
+    @staticmethod
+    def need_admin(func):
+        '''If the user is anon, don't run the command and inform the user'''
+        def check_admin(self, *args, **kwargs):
+            if not self.session.is_admin:
+                self.perror('Insufficient permissions')
+                return
+            func(self, *args, **kwargs)
+        check_admin.__name__ = func.__name__
+        return check_admin
 
     def get_user_consent(self, prompt) -> bool:
         return self.read_input(f'{prompt} [Yy/Nn]: ').lower() == "y"
@@ -339,11 +489,12 @@ use the command 'logout' and authenticate in order to use it'''
         prx = self.active_conn.proxy if args.proxy is None else args.proxy
         Commands.stablish_connection_main(self.active_conn, prx)
 
-    def do_logout(self, line):
+    def do_logout(self, args):
         self.session = Session()
         try:
-            if self.get_user_consent('Wanna log in?'):
-                Commands.login(self.active_conn)
+            with self.terminal_lock:
+                if self.get_user_consent('Wanna log in?'):
+                    Commands.login(self.active_conn)
             return
         except (KeyboardInterrupt, EOFError):
             self.poutput('')
@@ -402,16 +553,58 @@ use the command 'logout' and authenticate in order to use it'''
                 self.perror("You need to specify '--add' or '--remove' first")
         except IceFlix.Unauthorized:
             self.perror("Your session has expired")
-        except IceFlix.WrongMediaId as error_media:
-            self.perror('The selected media has been removed from the catalog server')
-            self.session.cached_titles.pop(self.session.selected_title.id)
-            self.session.selected_title = None
+        except IceFlix.WrongMediaId:
+            self.perror('The selected media seems to not exist on the catalog server')
 
     @cmd2.with_argparser(parsers.download_parser)
+    @need_creds
     def do_download(self, args):
-        self.poutput('Downloading...')
-        sleep(2)
-        self.poutput('Done! 2.03214 seconds')
+        Commands.download(self.active_conn)
+
+    @cmd2.with_argparser(parsers.admin_parser)
+    def do_admin(self, args):
+        if not self.session.is_admin:
+            if not Commands.admin(self.active_conn):
+                return
+            called_as_admin = False
+        else:
+            called_as_admin = True
+        if args.command:
+            func = self.cmd_func(args.command)
+            if not func:
+                return
+            try:
+                func(' '.join(args.arguments))
+            finally:
+                if not called_as_admin:
+                    self.session.is_admin = False
+                    self.session.admin_pass = None
+
+    def do_exit(self, args):
+        if not self.session.is_admin:
+            return True
+        self.session.make_user()
+
+    @cmd2.with_argparser(parsers.users_parser_base)
+    @need_admin
+    def do_users(self, args):
+        func = getattr(args, 'func', None)
+        if not func:
+            return self.do_help('catalog')
+        func(self, args)
+
+    def users_add(self, args):
+        Commands.add_user(self.active_conn, args.user, args.password)
+
+    def users_remove(self, args):
+        Commands.remove_user(self.active_conn, args.user)
+
+    parsers.users_add.set_defaults(func=users_add)
+    parsers.users_remove.set_defaults(func=users_remove)
+
+    def shutdown(self):
+        if self.active_conn and self.active_conn.communicator is not None:
+            self.active_conn.communicator.destroy()
 
     def _generate_prompt(self):
         media = '-#'
@@ -420,8 +613,13 @@ use the command 'logout' and authenticate in order to use it'''
             media = f'{title.id}#' if title.name is None else f'{title.id}-{title.name}#'
         media = cmd2.ansi.style(media, fg=COLOR_SELECTED_TITLE)
         raw_text = f'{self.session.display_name}:{media} '
-        color = COLOR_CONNECTED if self.active_conn.reachable else COLOR_DISCONNECTED 
-        return cmd2.ansi.style(raw_text, fg=color)
+        if not self.session.is_admin:
+            color = COLOR_CONNECTED if self.active_conn.reachable else COLOR_DISCONNECTED
+            admin_indicator = ''
+        else:
+            color = COLOR_ADMIN if self.active_conn.reachable else COLOR_DISCONNECTED
+            admin_indicator = '★'
+        return cmd2.ansi.style(f'{admin_indicator}{raw_text}', fg=color)
 
     def postcmd(self, stop, line):
         self.prompt = self._generate_prompt()

@@ -42,6 +42,7 @@ class MediaCatalog(IceFlix.MediaCatalog):
         return []
 
     def getTilesByTags(self, tags, includeAllTags, userToken, context):
+        print(userToken)
         if includeAllTags and tags == ['tuya', 'muya']:
             return ['1']
         elif not includeAllTags and ('tuya' in tags or 'muya' in tags):

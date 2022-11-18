@@ -21,13 +21,17 @@ def client_main():
         commands.show_logo()
         cmd = commands.cli_handler()
 
+        prx = 'MainAdapter -t -e 1.1:tcp -h 192.168.1.204 -p 9999 -t 60000'#self.read_input('Connection proxy: ')
+        cmd.connect(prx)
+
         if cmd.active_conn.main and cmd.do_logout(None):
             return
+        
+        cmd.prompt = cmd._generate_prompt()
 
         sys.exit(cmd.cmdloop())
     finally:
-        if cmd.active_conn.communicator is not None:
-            cmd.active_conn.communicator.destroy()
+        cmd.shutdown()
 
 
 if __name__ == '__main__':

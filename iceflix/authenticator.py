@@ -22,14 +22,17 @@ class Authenticator(IceFlix.Authenticator):
     def whois(userToken):
         raise IceFlix.Unauthorized
     
-    def isAdmin(adminToken):
-        pass
+    def isAdmin(self, adminToken, context):
+        from hashlib import sha256
+        return adminToken == sha256(b'secret').hexdigest()
     
-    def addUser(user, passwordHash, adminToken):
+    def addUser(self, user, passwordHash, adminToken, context):
+        return
         raise IceFlix.Unauthorized() 
         raise IceFlix.TemporaryUnavailable()
     
-    def removeUser(user, adminToken): 
+    def removeUser(self, user, adminToken, context): 
+        return
         raise IceFlix.Unauthorized()
         raise IceFlix.TemporaryUnavailable()
 

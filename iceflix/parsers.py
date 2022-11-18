@@ -28,3 +28,17 @@ tags_parser.add_argument('--add', action='store_true')
 tags_parser.add_argument('--remove', action='store_true')
 
 download_parser = cmd2.Cmd2ArgumentParser()
+
+admin_parser = cmd2.Cmd2ArgumentParser()
+admin_parser.add_argument('command', nargs='?')
+admin_parser.add_argument('arguments', nargs='*')
+
+users_parser_base = cmd2.Cmd2ArgumentParser()
+users_parser_sub = users_parser_base.add_subparsers(title='action')
+
+users_add = users_parser_sub.add_parser('add')
+users_add.add_argument('user', type=str)
+users_add.add_argument('password', type=str)
+
+users_remove = users_parser_sub.add_parser('remove')
+users_remove.add_argument('user', type=str)
