@@ -22,12 +22,24 @@ cat_use.add_argument('id', type=str)
 
 cat_show = cat_sub.add_parser('show')
 
-tags_parser = cmd2.Cmd2ArgumentParser()
-tags_parser.add_argument('tags', nargs='+', type=str)
-tags_parser.add_argument('--add', action='store_true')
-tags_parser.add_argument('--remove', action='store_true')
+selected_parser_base = cmd2.Cmd2ArgumentParser()
+selected_parser_sub = selected_parser_base.add_subparsers(title='subcommands')
 
-download_parser = cmd2.Cmd2ArgumentParser()
+tags_parser_base = selected_parser_sub.add_parser('tags')
+tags_parser_sub = tags_parser_base.add_subparsers(title='actions')
+
+add_tags = tags_parser_sub.add_parser('add')
+
+remove_tags = tags_parser_sub.add_parser('remove')
+
+tags_parser_base.add_argument('tags', nargs='+', type=str)
+
+download_parser = selected_parser_sub.add_parser('download')
+
+rename_parser = selected_parser_sub.add_parser('rename')
+rename_parser.add_argument('name', type=str)
+
+remove_parser = selected_parser_sub.add_parser('remove')
 
 admin_parser = cmd2.Cmd2ArgumentParser()
 admin_parser.add_argument('command', nargs='?')

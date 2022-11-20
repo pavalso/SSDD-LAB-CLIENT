@@ -28,8 +28,8 @@ class MediaCatalog(IceFlix.MediaCatalog):
                  ['tuya', 'muya']
             )
         )
-        if not userToken == 'SECRET_TOKEN':
-            raise IceFlix.Unauthorized
+        #if not userToken == 'SECRET_TOKEN':
+        #    raise IceFlix.Unauthorized
         #raise IceFlix.TemporaryUnavailable
         if not mediaId == media.mediaId:
             raise IceFlix.WrongMediaId
@@ -61,6 +61,9 @@ class MediaCatalog(IceFlix.MediaCatalog):
             raise IceFlix.Unauthorized
         if not mediaId == '1':
             raise IceFlix.WrongMediaId
+        return
+
+    def renameTile(self, mediaId, name, adminToken, context):
         return
 
 class MediaCatalogApp(Ice.Application):
