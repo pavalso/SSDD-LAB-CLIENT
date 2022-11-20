@@ -17,12 +17,12 @@ except ImportError:
 
 def client_main():
     '''Entry point of the program'''
-    try:
-        commands.show_logo()
-        cmd = commands.cli_handler()
+    commands.show_logo()
+    cmd = commands.cli_handler()
 
-        prx = 'MainAdapter -t -e 1.1:tcp -h 192.168.1.204 -p 9999 -t 60000'#self.read_input('Connection proxy: ')
+    prx = 'MainAdapter -t -e 1.1:tcp -h 192.168.1.204 -p 9999 -t 60000'#self.read_input('Connection proxy: ')
         
+    try:
         cmd.onecmd(f'reconnect -p "{prx}"')
 
         if cmd.active_conn.main and cmd.onecmd('logout'):

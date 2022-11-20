@@ -1,6 +1,5 @@
 import os
 import sys
-import logging
 
 import Ice
 import cmd2
@@ -9,7 +8,7 @@ Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
 import parsers
 
-from threading import Thread
+from threading import Timer, Thread
 from dataclasses import dataclass, field
 from getpass import getpass
 from hashlib import sha256
@@ -39,26 +38,27 @@ class ActiveConnection:
     reachable : bool = False
 
     def __post_init__(self) -> None:
-        Thread(target=self._periodic_conn_check, daemon=True).start()
+        self.communicator = Ice.initialize(sys.argv)
+        Thread(target=self._periodic_check, daemon=True).start()
 
-    def _periodic_conn_check(self):
-        last_val = self.reachable
+    def _periodic_check(self):
         while True:
-            try:
-                if self.main:
-                    self.main.ice_ping()
-                    self.reachable = True
-                sleep(5)
-            except Ice.ConnectionRefusedException:
+            _timer = Timer(interval=5, function=self._conn_check)
+            _timer.start()
+            _timer.finished.wait()
+
+    def _conn_check(self):
+        try:
+            if self.main:
+                self.main.ice_ping()
+                self.reachable = True
+            else:
                 self.reachable = False
-            except Ice.ConnectTimeoutException:
-                self.reachable = False
-            except Ice.CommunicatorDestroyedException:
-                return
-            if not last_val == self.reachable and self.terminal.terminal_lock.acquire(blocking=False):
-                self.terminal.async_update_prompt(self.terminal._generate_prompt())
-                self.terminal.terminal_lock.release()
-                last_val = self.reachable
+        except (Ice.ConnectFailedException, Ice.ConnectionRefusedException, Ice.ObjectNotExistException):
+            self.reachable = False
+        if self.terminal.terminal_lock.acquire(blocking=False):
+            self.terminal.async_update_prompt(self.terminal._generate_prompt())
+            self.terminal.terminal_lock.release()
 
     def needs_main(func):
         def wrapper(self, *args, **kwargs):
@@ -149,10 +149,6 @@ class Commands:
     def stablish_connection_main(conn : ActiveConnection, proxy):
         # TODO: __doc__ and error logging
         
-        if conn.communicator is not None:
-            conn.communicator.destroy()
-
-        conn.communicator = Ice.initialize(sys.argv)
         try:
             base = conn.communicator.stringToProxy(proxy)
 
@@ -162,15 +158,16 @@ class Commands:
             main = IceFlix.MainPrx.checkedCast(base)
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
-        except Ice.NoEndpointException:
+        except Ice.NoEndpointException as endpoint:
             conn.terminal.perror('Proxy needs an endpoint')
-        except Ice.ProxyParseException:
-            conn.terminal.perror('Given proxy is invalid')
+        except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
+            conn.terminal.perror(parse_exception.str)
         else:
             conn.main = main
             conn.proxy = proxy
             conn.reachable = True
             conn.terminal.prompt = conn.terminal._generate_prompt()
+            conn.terminal.poutput('Connection stablished')
             return conn
 
     @staticmethod
@@ -310,7 +307,8 @@ class Commands:
         admin_sha256_pass = sha256(admin_pass.encode('utf-8')).hexdigest()
         auth = conn.get_authenticator()
         if not auth.isAdmin(admin_sha256_pass):
-            raise IceFlix.Unauthorized
+            conn.terminal.perror('Invalid password')
+            return None
         conn.terminal.session.make_admin(admin_sha256_pass)
         return conn.terminal.session
 
@@ -330,7 +328,7 @@ class Commands:
         catalog = conn.get_catalog()
         catalog.renameTile(title.id, name, conn.terminal.session.token)
         title.name = name
-        conn.terminal.poutput('Name changed successfully')
+        conn.terminal.poutput(f'Title renamed to {name}')
 
     def remove(conn : ActiveConnection):
         title = conn.terminal.session.selected_title
@@ -339,14 +337,14 @@ class Commands:
         if not media:
             return
 
-        #if not media.provider:
-        #    conn.terminal.perror("The title selected couldn't be deleted, no provider associated")
-        #    return
+        if not media.provider:
+            conn.terminal.perror("The title selected couldn't be deleted, no provider associated")
+            return
 
-        raise IceFlix.Unauthorized
         media.provider.removeFile(title.id, conn.terminal.session.token)
         conn.terminal.session.cached_titles.pop(title.id)
         conn.terminal.session.selected_title = None
+        conn.terminal.poutput(f'Removed {title.name}')
 
 class cli_handler(cmd2.Cmd):
     '''Handles user input via an interactive command line'''
@@ -362,9 +360,6 @@ class cli_handler(cmd2.Cmd):
         self.debug = True
 
         self.prompt = self._generate_prompt()
-
-    def connect(self, proxy):
-        Commands.stablish_connection_main(self.active_conn, proxy)
 
     @staticmethod
     def need_creds(func):
@@ -390,7 +385,7 @@ use the command 'admin' to obtain them''')
             try:
                 func(self, *args, **kwargs)
             except IceFlix.Unauthorized:
-                self.perror('Invalid admin creedentials')
+                self.perror('Your admin creedentials are invalid')
         check_admin.__name__ = func.__name__
         return check_admin
 
@@ -572,12 +567,17 @@ use the command 'admin' to obtain them''')
             self.perror('This service is unavailable, try again later')
         except NoMainError:
             self.perror('No connection with the main server')
-        except Ice.ConnectionRefusedException as refused_error:
+        except Ice.ConnectionRefusedException:
             self.perror('The service refused the connection')
-        except Ice.ConnectionLostException as lost_error:
+        except Ice.ConnectionLostException:
             self.perror('Connection lost')
-        except Ice.ConnectTimeoutException as timeout_error:
+        except Ice.ConnectTimeoutException:
             self.perror('Connection timeout')
+        except cmd2.exceptions.Cmd2ArgparseError as parser_error:
+            raise parser_error
+        except Exception as exception:
+            self.perror('An unexpected error has occurred')
+            self.pexcept(exception)
 
     def perror(self, msg: str = '', *, end: str = '\n', apply_style: bool = True) -> None:
         return super().perror(msg, end=end, apply_style=apply_style)

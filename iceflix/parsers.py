@@ -13,7 +13,7 @@ cat_name = cat_get_sub.add_parser('name')
 cat_name.add_argument('name', type=str, default=None)
 cat_name.add_argument('--exact', required='-name' in sys.argv, action='store_true')
 
-cat_tags = cat_get_sub.add_parser('tags', aliases=['tag'])
+cat_tags = cat_get_sub.add_parser('tags')
 cat_tags.add_argument('tags', nargs='+')
 cat_tags.add_argument('--include', action='store_true')
 
