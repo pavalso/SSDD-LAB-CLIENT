@@ -3,6 +3,6 @@
 # TODO: Remove the services you don't need
 iceflix-main --Ice.Config=configs/main.config &
 iceflix-catalog --Ice.Config=configs/catalog.config &
-iceflix-authenticator --Ice.Config=configs/authenticator.config
-#iceflix-fileservice --Ice.Config=configs/fileservice.config
+iceflix-authenticator --Ice.Config=configs/authenticator.config &
+iceflix-streamprovider --Ice.Config=configs/fileservice.config
 read -n 1 -p "Press a key to exit:" 

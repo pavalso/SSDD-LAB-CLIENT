@@ -8,6 +8,10 @@
 # pylint: disable=broad-except
 
 import sys
+import os
+import Ice
+
+Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 
 try:
     import commands
@@ -20,7 +24,7 @@ def client_main():
     commands.show_logo()
     cmd = commands.cli_handler()
 
-    prx = 'MainAdapter -t -e 1.1:tcp -h 192.168.1.204 -p 9999 -t 60000'#self.read_input('Connection proxy: ')
+    prx = 'MainAdapter -t -e 1.1:tcp -p 9999 -h localhost -t 60000'#self.read_input('Connection proxy: ')
         
     try:
         cmd.onecmd(f'reconnect -p "{prx}"')

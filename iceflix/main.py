@@ -1,12 +1,10 @@
 """Module containing a template for a main service."""
 
 import logging
-import os
 import sys
 
 import Ice
 
-Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
 
 
@@ -19,6 +17,7 @@ class Main(IceFlix.Main):
 
     authenticator = None
     catalog = None
+    fileService = None
 
     def getAuthenticator(self, current):
         if Main.authenticator is None:
@@ -29,12 +28,19 @@ class Main(IceFlix.Main):
         if Main.catalog is None:
             raise IceFlix.TemporaryUnavailable()
         return Main.catalog
+
+    def getFileService(self, current):
+        if Main.fileService is None:
+            raise IceFlix.TemporaryUnavailable()
+        return Main.fileService
     
     def newService(self, object, service_id, current):
         if service_id == 'authenticator':
             Main.authenticator = IceFlix.AuthenticatorPrx.checkedCast(object)
         elif service_id == 'catalog':
             Main.catalog = IceFlix.MediaCatalogPrx.checkedCast(object)
+        elif service_id == 'fileService':
+            Main.fileService = IceFlix.FileServicePrx.checkedCast(object)
         return
     
     def announce(self, object, service_id, current):

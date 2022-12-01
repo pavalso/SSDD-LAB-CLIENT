@@ -29,10 +29,10 @@ tags_parser_base = selected_parser_sub.add_parser('tags')
 tags_parser_sub = tags_parser_base.add_subparsers(title='actions')
 
 add_tags = tags_parser_sub.add_parser('add')
+add_tags.add_argument('tags', nargs='+')
 
 remove_tags = tags_parser_sub.add_parser('remove')
-
-tags_parser_base.add_argument('tags', nargs='+', type=str)
+remove_tags.add_argument('tags', nargs='+')
 
 download_parser = selected_parser_sub.add_parser('download')
 
@@ -54,3 +54,6 @@ users_add.add_argument('password', type=str)
 
 users_remove = users_parser_sub.add_parser('remove')
 users_remove.add_argument('user', type=str)
+
+upload_parser = cmd2.Cmd2ArgumentParser()
+upload_parser.add_argument('file', type=str)

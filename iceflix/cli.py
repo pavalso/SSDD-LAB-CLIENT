@@ -6,6 +6,7 @@ import sys
 from iceflix.main import MainApp
 from iceflix.authenticator import AuthenticatorApp
 from iceflix.catalog import MediaCatalogApp
+from iceflix.FileService import FileServiceApp
 #from iceflix.client import client_main
 
 
@@ -30,8 +31,8 @@ def catalog_service():
 
 def streamprovider_service():
     """Handles the `streamingservice` CLI command."""
-    print("Streaming service")
-    sys.exit(0)
+    logging.info("Streaming service starting...")
+    sys.exit(FileServiceApp().main(sys.argv))
 
 
 def authentication_service():

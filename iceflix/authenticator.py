@@ -65,10 +65,8 @@ class AuthenticatorApp(Ice.Application):
 
             test.newService(IceFlix.AuthenticatorPrx.checkedCast(self.proxy), 'authenticator')
 
-        #self.shutdownOnInterrupt()
-        #comm.waitForShutdown()
-        input('Exit authenticator: ')
-        print('Ok')
+        self.shutdownOnInterrupt()
+        comm.waitForShutdown()
 
         return 0
 

@@ -43,6 +43,8 @@ class MediaCatalog(IceFlix.MediaCatalog):
 
     def getTilesByTags(self, tags, includeAllTags, userToken, context):
         print(userToken)
+        if not userToken == 'SECRET_TOKEN':
+            raise IceFlix.Unauthorized
         if includeAllTags and tags == ['tuya', 'muya']:
             return ['1']
         elif not includeAllTags and ('tuya' in tags or 'muya' in tags):
@@ -50,14 +52,14 @@ class MediaCatalog(IceFlix.MediaCatalog):
         return []
 
     def addTags(self, mediaId, tags, userToken, context):
-        if not userToken == 'SECRET_TOKEN':
+        if not userToken == 'SECRET_TOKEN1':
             raise IceFlix.Unauthorized
         if not mediaId == '1':
             raise IceFlix.WrongMediaId
         return
 
     def removeTags(self, mediaId, tags, userToken, context):
-        if not userToken == 'SECRET_TOKEN':
+        if not userToken == 'SECRET_TOKEN1':
             raise IceFlix.Unauthorized
         if not mediaId == '1':
             raise IceFlix.WrongMediaId

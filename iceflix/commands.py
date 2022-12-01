@@ -8,21 +8,25 @@ Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
 import parsers
 
+from enum import Enum
 from threading import Timer, Thread
 from dataclasses import dataclass, field
 from getpass import getpass
 from hashlib import sha256
 from time import sleep, perf_counter_ns
 
+from FileUploader import FileUploaderApp
+
 
 MAX_TRIES = 3
 
 COLOR_SELECTED_TITLE = cmd2.ansi.RgbFg(200,200,200)
 
-COLOR_CONNECTED = cmd2.ansi.RgbFg(0,225,255)
-COLOR_DISCONNECTED = cmd2.ansi.RgbFg(200,0,0)
-
-COLOR_ADMIN = cmd2.ansi.RgbFg(225,0,255)
+class COLORS(Enum):
+    ANON = cmd2.ansi.RgbFg(255,255,255)
+    USER = cmd2.ansi.RgbFg(0,100,255)
+    ADMIN = cmd2.ansi.RgbFg(255,0,0)
+    DISCONNECTED = cmd2.ansi.RgbFg(0,0,0)
 
 class NoMainError(Exception):
     def __init__(self) -> None:
@@ -32,10 +36,24 @@ class NoMainError(Exception):
 class ActiveConnection:
     terminal : cmd2.Cmd
     communicator : Ice.CommunicatorI = None
-    main = None
+    _main = None
     proxy : str = None
     
     reachable : bool = False
+    remote : str = '-'
+
+    @property
+    def main(self):
+        return self._main
+
+    @main.setter
+    def main(self, new):
+        self._main = new
+        self.reachable = new is not None
+        if self.reachable:
+            self.remote = new.ice_getConnection().getEndpoint().getInfo().host
+        else:
+            self.remote = '-'
 
     def __post_init__(self) -> None:
         self.communicator = Ice.initialize(sys.argv)
@@ -60,6 +78,7 @@ class ActiveConnection:
             self.terminal.async_update_prompt(self.terminal._generate_prompt())
             self.terminal.terminal_lock.release()
 
+    @staticmethod
     def needs_main(func):
         def wrapper(self, *args, **kwargs):
             if not self.reachable:
@@ -74,6 +93,10 @@ class ActiveConnection:
     @needs_main
     def get_catalog(self):
         return self.main.getCatalog()
+
+    @needs_main
+    def get_file_service(self):
+        return self.main.getFileService()
 
 @dataclass
 class PartiaMedia:
@@ -101,7 +124,7 @@ class PartiaMedia:
         name = f'name: {self.name}' if self.name is not None else None
         tags = 'tags: {0}'.format(','.join(self.tags)) if self.tags is not None else None
         data = ' -> '.join([string for string in [name, tags] if string is not None])
-        return '{0}. {1}'.format(self.id, 'Nothing to show' if not data else data)
+        return '{0}. {1}'.format(self.id, 'A new media' if not data else data)
 
 @dataclass
 class Session:
@@ -165,12 +188,12 @@ class Commands:
         else:
             conn.main = main
             conn.proxy = proxy
-            conn.reachable = True
             conn.terminal.prompt = conn.terminal._generate_prompt()
             conn.terminal.poutput('Connection stablished')
             return conn
 
     @staticmethod
+    @ActiveConnection.needs_main
     def login(conn : ActiveConnection):
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
@@ -231,6 +254,7 @@ class Commands:
         conn.terminal.session.selected_title = pmedia
         conn.terminal.poutput(f'Selected: {pmedia}')
 
+    @staticmethod
     def save_pmedia(conn : ActiveConnection, media : dict[str, PartiaMedia]):
         union = set(conn.terminal.session.cached_titles).intersection(media)
         for id in union:
@@ -245,12 +269,13 @@ class Commands:
     def show_titles(conn : ActiveConnection, titles : dict[str, PartiaMedia]):
         buffer = ''
         for pmedia in titles.values():
-            buffer += str(pmedia)
+            buffer += f'{pmedia}\n'
         if not buffer:
             conn.terminal.perror('No media to show')
             return
-        conn.terminal.poutput(buffer)
+        conn.terminal.poutput(buffer[:-1])
 
+    @staticmethod
     def add_tags(conn : ActiveConnection, tags : list[str]):
         catalog = conn.get_catalog()
         title = conn.terminal.session.selected_title
@@ -260,6 +285,7 @@ class Commands:
         title.tags = list(set(title.tags))
         catalog.addTags(title.id, tags, conn.terminal.session.token)
 
+    @staticmethod
     def remove_tags(conn : ActiveConnection, tags : list[str]):
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
@@ -267,6 +293,7 @@ class Commands:
         title.tags = None if not tags else tags
         catalog.removeTags(title.id, tags, conn.terminal.session.token)
 
+    @staticmethod
     def download(conn : ActiveConnection):
         title = conn.terminal.session.selected_title
         media = title.fetch(conn)
@@ -302,6 +329,8 @@ class Commands:
                     conn.terminal.poutput(f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds")
                     handler.close(session.token)
 
+    @staticmethod
+    @ActiveConnection.needs_main
     def admin(conn : ActiveConnection):
         admin_pass = getpass('Admin password: ')
         admin_sha256_pass = sha256(admin_pass.encode('utf-8')).hexdigest()
@@ -312,17 +341,20 @@ class Commands:
         conn.terminal.session.make_admin(admin_sha256_pass)
         return conn.terminal.session
 
+    @staticmethod
     def add_user(conn : ActiveConnection, user : str, password : str):
         auth = conn.get_authenticator()
         password_hash = sha256(password.encode('utf-8')).hexdigest()
         auth.addUser(user, password_hash, conn.terminal.session.token)
         conn.terminal.poutput(f'Added user {user}')
 
+    @staticmethod
     def remove_user(conn : ActiveConnection, user : str):
         auth = conn.get_authenticator()
         auth.removeUser(user, conn.terminal.session.admin_pass)
         conn.terminal.poutput(f'Removed user {user}')
 
+    @staticmethod
     def rename(conn : ActiveConnection, name : str):
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
@@ -330,6 +362,7 @@ class Commands:
         title.name = name
         conn.terminal.poutput(f'Title renamed to {name}')
 
+    @staticmethod
     def remove(conn : ActiveConnection):
         title = conn.terminal.session.selected_title
         media = title.fetch(conn)
@@ -345,6 +378,20 @@ class Commands:
         conn.terminal.session.cached_titles.pop(title.id)
         conn.terminal.session.selected_title = None
         conn.terminal.poutput(f'Removed {title.name}')
+
+    @staticmethod
+    def upload(conn : ActiveConnection, file : str):
+        with Ice.initialize() as uploader_comm:
+            conn.terminal.poutput(f'Uploading file: {file}...')
+            file_service = conn.get_file_service()
+            file_uploader = FileUploaderApp(file, uploader_comm)
+            file_uploader.main()
+            new_file_id = file_service.uploadFile(file_uploader.cast, conn.terminal.session.token)
+            if new_file_id is None:
+                conn.terminal.perror(f'No ID was assigned by the file service')
+                return
+            Commands.save_pmedia(conn, {new_file_id : PartiaMedia(new_file_id)})
+            conn.terminal.poutput(f'Upload finished.\nThis file has the ID {new_file_id}')
 
 class cli_handler(cmd2.Cmd):
     '''Handles user input via an interactive command line'''
@@ -407,6 +454,10 @@ use the command 'admin' to obtain them''')
         prx = self.active_conn.proxy if args.proxy is None else args.proxy
         Commands.stablish_connection_main(self.active_conn, prx)
 
+    def do_disconnect(self, args):
+        self.active_conn.main = None
+        self.session.make_user()
+
     def do_logout(self, args):
         self.session = Session()
         try:
@@ -454,8 +505,15 @@ use the command 'admin' to obtain them''')
     @cmd2.with_argparser(parsers.admin_parser)
     def do_admin(self, args):
         if not self.session.is_admin:
-            if not Commands.admin(self.active_conn):
-                return
+            try:
+                if not Commands.admin(self.active_conn):
+                    return
+            except KeyboardInterrupt:
+                self.poutput('')
+                return None
+            except EOFError:
+                self.poutput('')
+                return True
             called_as_admin = False
         else:
             called_as_admin = True
@@ -537,20 +595,31 @@ use the command 'admin' to obtain them''')
         if self.active_conn.communicator is not None:
             self.active_conn.communicator.destroy()
 
+    @cmd2.with_argparser(parsers.upload_parser)
+    @need_admin
+    def do_upload(self, args):
+        if not os.path.isfile(args.file):
+            self.perror("Input file doesn't exists")
+            return
+        Commands.upload(self.active_conn, args.file)
+
     def _generate_prompt(self):
         media = '-#'
         title = self.session.selected_title
         if title is not None:
             media = f'{title.id}#' if title.name is None else f'{title.id}-{title.name}#'
         media = cmd2.ansi.style(media, fg=COLOR_SELECTED_TITLE)
-        raw_text = f'{self.session.display_name}:{media} '
-        if not self.session.is_admin:
-            color = COLOR_CONNECTED if self.active_conn.reachable else COLOR_DISCONNECTED
-            admin_indicator = ''
+        remote = self.active_conn.remote
+        raw_text = f'{self.session.display_name}@{remote}:{media} '
+        if not self.active_conn.reachable:
+            color = COLORS.DISCONNECTED
+        elif self.session.is_admin:
+            color = COLORS.ADMIN
+        elif self.session.is_anon:
+            color = COLORS.ANON
         else:
-            color = COLOR_ADMIN if self.active_conn.reachable else COLOR_DISCONNECTED
-            admin_indicator = '★'
-        return cmd2.ansi.style(f'{admin_indicator}{raw_text}', fg=color)
+            color = COLORS.USER
+        return cmd2.ansi.style(f'{raw_text}', fg=color.value)
 
     def postcmd(self, stop, line):
         self.prompt = self._generate_prompt()
@@ -584,8 +653,7 @@ use the command 'admin' to obtain them''')
 
 def show_logo():
     '''Prints in screen the app logo'''
-    print(
-        r"""
+    logo = r"""
  ██▓ ▄████▄  ▓█████   █████▒██▓     ██▓▒██   ██▒
 ▓██▒▒██▀ ▀█  ▓█   ▀ ▓██   ▒▓██▒    ▓██▒▒▒ █ █ ▒░
 ▒██▒▒▓█    ▄ ▒███   ▒████ ░▒██░    ▒██▒░░  █   ░
@@ -597,4 +665,7 @@ def show_logo():
  ░  ░ ░         ░  ░           ░  ░ ░   ░    ░
     ░
 """
+    ascii_msg = cmd2.ansi.style(logo, fg=cmd2.ansi.RgbFg(175,200,255))
+    print(
+        ascii_msg
     )
