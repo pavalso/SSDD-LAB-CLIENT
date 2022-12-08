@@ -25,11 +25,9 @@ def client_main():
     cmd = commands.cli_handler()
         
     try:
-        cmd.terminal_lock.acquire()
         while not cmd.active_conn.reachable:
-            prx = cmd.read_input('Connection proxy: ')
+            prx = cmd.read('Connection proxy: ')
             cmd.onecmd(f'reconnect -p "{prx}"')
-        cmd.terminal_lock.release()
 
         if cmd.active_conn.main and cmd.onecmd('logout'):
             return
