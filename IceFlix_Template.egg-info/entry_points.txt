@@ -1,2 +1,0 @@
-[console_scripts]
-iceflix = iceflix.cli:client
