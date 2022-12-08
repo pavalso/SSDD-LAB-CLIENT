@@ -170,6 +170,10 @@ class Commands:
     def stablish_connection_main(conn : ActiveConnection, proxy):
         # TODO: __doc__ and error logging
         
+        if not proxy:
+            conn.terminal.perror(f"Proxy can't be empty")
+            return
+
         try:
             base = conn.communicator.stringToProxy(proxy)
             main = IceFlix.MainPrx.checkedCast(base)

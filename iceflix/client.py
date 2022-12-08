@@ -23,7 +23,7 @@ def client_main():
     '''Entry point of the program'''
     commands.show_logo()
     cmd = commands.cli_handler()
-        
+
     try:
         cmd.terminal_lock.acquire()
         while not cmd.active_conn.reachable:
@@ -37,6 +37,8 @@ def client_main():
         cmd.prompt = cmd._generate_prompt()
 
         sys.exit(cmd.cmdloop())
+    except (KeyboardInterrupt, EOFError):
+        pass
     finally:
         cmd.shutdown()
 
