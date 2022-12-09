@@ -1,3 +1,22 @@
+'''
+    Cmd handling
+'''
+
+# pylint: disable=import-error, wrong-import-position, no-member, ungrouped-imports
+
+from enum import Enum
+from threading import Timer, Thread
+from dataclasses import dataclass, field
+from getpass import getpass
+from hashlib import sha256
+from time import sleep, perf_counter_ns
+
+try:
+    from file_uploader import FileUploaderApp
+except ImportError:
+    from iceflix.file_uploader import FileUploaderApp
+
+
 import os
 import sys
 
@@ -11,46 +30,44 @@ try:
 except ImportError:
     from iceflix import parsers
 
-
-from enum import Enum
-from threading import Timer, Thread
-from dataclasses import dataclass, field
-from getpass import getpass
-from hashlib import sha256
-from time import sleep, perf_counter_ns
-
-try:
-    from FileUploader import FileUploaderApp
-except ImportError:
-    from iceflix.FileUploader import FileUploaderApp
-
-
 MAX_TRIES = 3
 
 COLOR_SELECTED_TITLE = cmd2.ansi.RgbFg(200,200,200)
 
 class COLORS(Enum):
+    '''
+        Colors for each type of user and connection state
+    '''
     ANON = cmd2.ansi.RgbFg(255,255,255)
     USER = cmd2.ansi.RgbFg(0,100,255)
     ADMIN = cmd2.ansi.RgbFg(255,0,0)
     DISCONNECTED = cmd2.ansi.RgbFg(0,0,0)
 
 class NoMainError(Exception):
+    '''
+        If no connection with main server this is raised
+    '''
     def __init__(self) -> None:
         super().__init__('No active connection to the main server')
 
 @dataclass
 class ActiveConnection:
+    '''
+        Represents a connection (Connected or not) with a main server
+    '''
     terminal : cmd2.Cmd
     communicator : Ice.CommunicatorI = None
     _main = None
     proxy : str = None
-    
+
     reachable : bool = False
     remote : str = '-'
 
     @property
     def main(self):
+        '''
+            Returns the main server proxy
+        '''
         return self._main
 
     @main.setter
@@ -82,11 +99,14 @@ class ActiveConnection:
         except (Ice.ConnectFailedException, Ice.ConnectionRefusedException, Ice.ObjectNotExistException):
             self.reachable = False
         if self.terminal.terminal_lock.acquire(blocking=False):
-            self.terminal.async_update_prompt(self.terminal._generate_prompt())
+            self.terminal.async_update_prompt(self.terminal.get_prompt())
             self.terminal.terminal_lock.release()
 
     @staticmethod
     def needs_main(func):
+        '''
+            Only runs the command if the main server is reachable
+        '''
         def wrapper(self, *args, **kwargs):
             if not self.reachable:
                 raise NoMainError
@@ -95,18 +115,30 @@ class ActiveConnection:
 
     @needs_main
     def get_authenticator(self):
+        '''
+            Retrieves an authenticator from the main server
+        '''
         return self.main.getAuthenticator()
 
     @needs_main
     def get_catalog(self):
+        '''
+            Retrieves a catalog from the main server
+        '''
         return self.main.getCatalog()
 
     @needs_main
     def get_file_service(self):
+        '''
+            Retrieves a file service from the main server
+        '''
         return self.main.getFileService()
 
 @dataclass
 class PartiaMedia:
+    '''
+        Represents a media if any of its atributes is known
+    '''
     id : str
     name : str = None
     tags : list[str] = None
@@ -114,6 +146,9 @@ class PartiaMedia:
     media : IceFlix.Media = None
 
     def fetch(self, conn : ActiveConnection):
+        '''
+            Gets this media from the catalog server, updating all its information
+        '''
         catalog = conn.get_catalog()
 
         session = conn.terminal.session
@@ -129,13 +164,17 @@ class PartiaMedia:
 
     def __str__(self) -> str:
         name = f'name: {self.name}' if self.name is not None else None
-        tags = 'tags: {0}'.format(','.join(self.tags)) if self.tags is not None else None
+        tags_list = ','.join(self.tags)
+        tags = f'tags: {tags_list}' if self.tags is not None else None
         data = ' -> '.join([string for string in [name, tags] if string is not None])
-        return '{0}. {1}'.format(self.id, 'A new media' if not data else data)
+        media_data = 'A new media' if not data else data
+        return f'{self.id}. {media_data}'
 
 @dataclass
 class Session:
-    '''Stores the current session data'''
+    '''
+        Stores the current session data
+    '''
     user: str = None
     pass_hash: str = None
     admin_pass: str = None
@@ -150,14 +189,23 @@ class Session:
         self.display_name = self.user if self.user else 'User'
 
     def make_admin(self, admin_password : str):
+        '''
+            The user becomes an admin
+        '''
         self.admin_pass = admin_password
         self.is_admin = True
 
     def make_user(self):
+        '''
+            The user becomes an user
+        '''
         self.admin_pass = None
         self.is_admin = False
 
     def refresh(self, conn : ActiveConnection):
+        '''
+            Tries to obtain a new token from the authentication services
+        '''
         auth = conn.get_authenticator()
         token = auth.refreshAuthorization(self.user, self.pass_hash)
         self.token = token
@@ -165,34 +213,41 @@ class Session:
         return self
 
 class Commands:
+    '''
+        Command logic
+    '''
 
     @staticmethod
     def stablish_connection_main(conn : ActiveConnection, proxy):
-        # TODO: __doc__ and error logging
-        
+        '''
+            Tries to reach a main proxy, if it reaches stablish the connection
+        '''
         if not proxy:
-            conn.terminal.perror(f"Proxy can't be empty")
-            return
+            return conn.terminal.perror("Proxy can't be empty")
 
         try:
             base = conn.communicator.stringToProxy(proxy)
             main = IceFlix.MainPrx.checkedCast(base)
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
-        except Ice.NoEndpointException as endpoint:
+        except Ice.NoEndpointException:
             conn.terminal.perror('Proxy needs an endpoint')
         except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
             conn.terminal.perror(parse_exception.str)
         else:
             conn.main = main
             conn.proxy = proxy
-            conn.terminal.prompt = conn.terminal._generate_prompt()
+            conn.terminal.prompt = conn.terminal.get_prompt()
             conn.terminal.poutput('Connection stablished')
             return conn
+        return None
 
     @staticmethod
     @ActiveConnection.needs_main
     def login(conn : ActiveConnection):
+        '''
+            Connects to the authentication services and authenticate the user
+        '''
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
         password_hash = sha256(password.encode('utf-8')).hexdigest()
@@ -204,7 +259,7 @@ class Commands:
                 except IceFlix.TemporaryUnavailable as temporary_error:
                     if not i == MAX_TRIES:
                         conn.terminal.pwarning(
-                            f"({i}) Couldn't connect to the authentication service, trying again in 5 seconds")
+                            f"({i}) Couldn't connect. Trying again in 5 seconds")
                         sleep(5)
                     else:
                         raise IceFlix.TemporaryUnavailable from temporary_error
@@ -215,6 +270,9 @@ class Commands:
 
     @staticmethod
     def get_catalog_name(conn : ActiveConnection, name : str, exact : bool):
+        '''
+            Tries to get a tile by its name from the catalog services
+        '''
         catalog = conn.get_catalog()
 
         titles = catalog.getTilesByName(name, exact)
@@ -231,40 +289,53 @@ class Commands:
 
     @staticmethod
     def get_catalog_tags(conn : ActiveConnection, tags : list[str], include_all : bool):
+        '''
+            Tries to get a tile by its tags from the catalog services
+        '''
         catalog = conn.get_catalog()
 
         titles = catalog.getTilesByTags(tags, include_all, conn.terminal.session.token)
         if not titles:
+            title_tags = ', '.join(tags)
             if include_all:
-                conn.terminal.perror('No media that have the tags: {0}'.format(', '.join(tags)))
+                conn.terminal.perror(f'No media found with tags: {title_tags}')
             else:
-                conn.terminal.perror('No media that have any of this tags: {0}'.format(', '.join(tags)))
+                conn.terminal.perror(f'None of the media contains: {title_tags}')
             return
         buffer = {id: PartiaMedia(id, tags=tags) for id in titles}
         Commands.save_pmedia(conn, buffer)
         Commands.show_titles(conn, buffer)
 
     @staticmethod
-    def use_title(conn : ActiveConnection, id : str):
-        if id not in conn.terminal.session.cached_titles:
+    def use_title(conn : ActiveConnection, title_id : str):
+        '''
+            Allows the user to select a title to modify/download/remove it
+        '''
+        if title_id not in conn.terminal.session.cached_titles:
             return
-        pmedia = conn.terminal.session.cached_titles[id]
+        pmedia = conn.terminal.session.cached_titles[title_id]
         conn.terminal.session.selected_title = pmedia
         conn.terminal.poutput(f'Selected: {pmedia}')
 
     @staticmethod
     def save_pmedia(conn : ActiveConnection, media : dict[str, PartiaMedia]):
+        '''
+            Saves a dictionary of media to the user cache
+        '''
         union = set(conn.terminal.session.cached_titles).intersection(media)
-        for id in union:
-            updated = media[id]
-            cached = conn.terminal.session.cached_titles[id]
+        for title_id in union:
+            updated = media[title_id]
+            cached = conn.terminal.session.cached_titles[title_id]
             updated.name = cached.name if updated.name is None else updated.name
             updated.tags = cached.tags if updated.tags is None else updated.tags
-            
+
         conn.terminal.session.cached_titles.update(media)
 
     @staticmethod
     def show_titles(conn : ActiveConnection, titles : dict[str, PartiaMedia]):
+        '''
+            Prints all the media in titles
+        '''
         buffer = ''
         for pmedia in titles.values():
             buffer += f'{pmedia}\n'
@@ -275,6 +346,9 @@ class Commands:
 
     @staticmethod
     def add_tags(conn : ActiveConnection, tags : list[str]):
+        '''
+            Add tags to the selected media
+        '''
         catalog = conn.get_catalog()
         title = conn.terminal.session.selected_title
         if not title.tags:
@@ -285,6 +359,9 @@ class Commands:
 
     @staticmethod
     def remove_tags(conn : ActiveConnection, tags : list[str]):
+        '''
+            Remove tags from the selected media
+        '''
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
         tags = list(set(title.tags).difference(tags))
@@ -293,6 +370,9 @@ class Commands:
 
     @staticmethod
     def download(conn : ActiveConnection):
+        '''
+            Downloads a media from the media provider
+        '''
         title = conn.terminal.session.selected_title
         media = title.fetch(conn)
 
@@ -300,13 +380,13 @@ class Commands:
             return
 
         if not media.provider:
-            conn.terminal.perror("The title selected couldn't be downloaded, no provider associated")
+            conn.terminal.perror("The title selected couldn't be downloaded")
             return
 
         session = conn.terminal.session
         handler = title.media.provider.openFile(title.id, session.token)
         with conn.terminal.terminal_lock:
-            conn.terminal.poutput(f"Starting download...")
+            conn.terminal.poutput('Starting download...')
             time_initial = perf_counter_ns()
             with open(title.name, 'wb') as file:
                 try:
@@ -324,12 +404,19 @@ class Commands:
                 else:
                     time_end = perf_counter_ns()
                     final_time = time_end - time_initial
-                    conn.terminal.poutput(f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds")
+                    conn.terminal.poutput(
+                        f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds"
+                        )
                     handler.close(session.token)
 
     @staticmethod
     @ActiveConnection.needs_main
     def admin(conn : ActiveConnection):
+        '''
+            Authenticate an admin password and makes the user an admin if the password is correct
+            If used at the beginning of a command, the user first becomes an admin,
+            executes the command as admin and then the user loses its admin status
+        '''
         admin_pass = getpass('Admin password: ')
         admin_sha256_pass = sha256(admin_pass.encode('utf-8')).hexdigest()
         auth = conn.get_authenticator()
@@ -341,6 +428,9 @@ class Commands:
 
     @staticmethod
     def add_user(conn : ActiveConnection, user : str, password : str):
+        '''
+            Adds an user to the authentication services
+        '''
         auth = conn.get_authenticator()
         password_hash = sha256(password.encode('utf-8')).hexdigest()
         auth.addUser(user, password_hash, conn.terminal.session.admin_pass)
@@ -348,12 +438,18 @@ class Commands:
 
     @staticmethod
     def remove_user(conn : ActiveConnection, user : str):
+        '''
+            Removes an user from the authentication services
+        '''
         auth = conn.get_authenticator()
         auth.removeUser(user, conn.terminal.session.admin_pass)
         conn.terminal.poutput(f'Removed user {user}')
 
     @staticmethod
     def rename(conn : ActiveConnection, name : str):
+        '''
+            Renames selected media
+        '''
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
         catalog.renameTile(title.id, name, conn.terminal.session.admin_pass)
@@ -362,6 +458,9 @@ class Commands:
 
     @staticmethod
     def remove(conn : ActiveConnection):
+        '''
+            Removes selected media
+        '''
         title = conn.terminal.session.selected_title
         media = title.fetch(conn)
 
@@ -379,19 +478,23 @@ class Commands:
 
     @staticmethod
     def upload(conn : ActiveConnection, file : str):
+        '''
+            Upload a given file to the catalog
+        '''
         with Ice.initialize() as uploader_comm:
             conn.terminal.poutput(f'Uploading file: {file}...')
             file_service = conn.get_file_service()
             file_uploader = FileUploaderApp(file, uploader_comm)
             file_uploader.main()
-            new_file_id = file_service.uploadFile(file_uploader.cast, conn.terminal.session.admin_pass)
+            cast = file_uploader.cast
+            new_file_id = file_service.uploadFile(cast, conn.terminal.session.admin_pass)
             if new_file_id is None:
-                conn.terminal.perror(f'No ID was assigned by the file service')
+                conn.terminal.perror('No ID was assigned by the file service')
                 return
             Commands.save_pmedia(conn, {new_file_id : PartiaMedia(new_file_id)})
             conn.terminal.poutput(f'Upload finished.\nThis file has the ID {new_file_id}')
 
-class cli_handler(cmd2.Cmd):
+class CliHandler(cmd2.Cmd):
     '''Handles user input via an interactive command line'''
 
     session : Session
@@ -404,10 +507,13 @@ class cli_handler(cmd2.Cmd):
 
         self.debug = True
 
-        self.prompt = self._generate_prompt()
+        self.prompt = self.get_prompt()
 
     @staticmethod
     def need_creds(func):
+        '''
+            Only runs the command if the user is authenticated
+        '''
         def check_creds(self, *args, **kwargs):
             if self.session.is_anon:
                 self.perror(
@@ -421,7 +527,9 @@ use the command 'logout' and authenticate in order to use it'''
 
     @staticmethod
     def need_admin(func):
-        '''If the user is anon, don't run the command and inform the user'''
+        '''
+            Only runs the command if the user is admin
+        '''
         def check_admin(self, *args, **kwargs):
             if not self.session.is_admin:
                 self.perror('''This command needs administrative permissions
@@ -436,6 +544,9 @@ use the command 'admin' to obtain them''')
 
     @staticmethod
     def need_selected(func):
+        '''
+            Only runs the command if the user has selected a media
+        '''
         def check_selected(self, *args, **kwargs):
             if self.session.selected_title is None:
                 self.perror("First you need to select a title using 'catalog use id'")
@@ -445,52 +556,82 @@ use the command 'admin' to obtain them''')
         return check_selected
 
     def get_user_consent(self, prompt) -> bool:
+        '''
+            Asks the user yes or no, returning True if yes else False
+        '''
         return self.read_input(f'{prompt} [Yy/Nn]: ').lower() == "y"
 
     @cmd2.with_argparser(parsers.reconnect_parser)
     def do_reconnect(self, args):
+        '''
+            Reconnect to the main service, can be given a proxy
+        '''
         prx = self.active_conn.proxy if args.proxy is None else args.proxy
         Commands.stablish_connection_main(self.active_conn, prx)
 
-    def do_disconnect(self, args):
+    def do_disconnect(self, _):
+        '''
+            Closes the connection to the main service, doesn't end the program execution
+        '''
         self.active_conn.main = None
         self.session.make_user()
 
-    def do_logout(self, args):
+    def do_logout(self, _):
+        '''
+            Disconnects from the current user and allows to authenticate again
+        '''
         self.session = Session()
         try:
             with self.terminal_lock:
                 if self.get_user_consent('Wanna log in?'):
                     Commands.login(self.active_conn)
-            return
+            return None
         except (KeyboardInterrupt, EOFError):
             self.poutput('')
             return True
 
     @cmd2.with_argparser(parsers.cat_base)
     def do_catalog(self, args):
+        '''
+            Catalog related set of commands
+        '''
         func = getattr(args, 'func', None)
         if not func:
             return self.do_help('catalog')
-        func(self, args)
+        return func(self, args)
 
     def get_catalog(self, args):
+        '''
+            Retrieves titles by name or tag from the catalog service
+        '''
         func = getattr(args, 'search_func', None)
         if not func:
             return self.do_help('catalog get')
-        func(self, args)
+        return func(self, args)
 
     def use_title(self, args):
+        '''
+            Allows the user to select a title from the titles cached
+        '''
         Commands.use_title(self.active_conn, args.id)
 
     def search_name(self, args):
+        '''
+            Retrieves titles by name, can be exact or not
+        '''
         Commands.get_catalog_name(self.active_conn, args.name, args.exact)
 
     @need_creds
     def search_tags(self, args):
+        '''
+            Retrieves titles by tags, can include all or not
+        '''
         Commands.get_catalog_tags(self.active_conn, args.tags, args.include)
 
-    def show_catalog(self, args):
+    def show_catalog(self, _):
+        '''
+            Shows currently cached titles
+        '''
         Commands.show_titles(self.active_conn, self.session.cached_titles)
 
     parsers.cat_get_base.set_defaults(func=get_catalog)
@@ -502,10 +643,13 @@ use the command 'admin' to obtain them''')
 
     @cmd2.with_argparser(parsers.admin_parser)
     def do_admin(self, args):
+        '''
+            Transforms the user to admin
+        '''
         if not self.session.is_admin:
             try:
                 if not Commands.admin(self.active_conn):
-                    return
+                    return None
             except KeyboardInterrupt:
                 self.poutput('')
                 return None
@@ -525,24 +669,37 @@ use the command 'admin' to obtain them''')
             finally:
                 if not called_as_admin:
                     self.session.make_user()
+        return None
 
-    def do_exit(self, args):
+    def do_exit(self, _):
+        '''
+            If the user is an admin removes permissions, if not the program ends
+        '''
         if not self.session.is_admin:
             return True
-        self.session.make_user()
+        return self.session.make_user()
 
     @cmd2.with_argparser(parsers.users_parser_base)
     @need_admin
     def do_users(self, args):
+        '''
+            Users related set of commands
+        '''
         func = getattr(args, 'func', None)
         if not func:
             return self.do_help('catalog')
-        func(self, args)
+        return func(self, args)
 
     def users_add(self, args):
+        '''
+            Adds an user to the authentication service
+        '''
         Commands.add_user(self.active_conn, args.user, args.password)
 
     def users_remove(self, args):
+        '''
+            Removes an user from the authentication service
+        '''
         Commands.remove_user(self.active_conn, args.user)
 
     parsers.users_add.set_defaults(func=users_add)
@@ -551,34 +708,55 @@ use the command 'admin' to obtain them''')
     @cmd2.with_argparser(parsers.selected_parser_base)
     @need_selected
     def do_selected(self, args):
+        '''
+            Selected related set of commands
+        '''
         func = getattr(args, 'func', None)
         if not func:
             return self.do_help('selected')
-        func(self, args)
+        return func(self, args)
 
     @need_admin
     def selected_rename(self, args):
+        '''
+            Rename selected title
+        '''
         Commands.rename(self.active_conn, args.name)
 
     @need_creds
     def selected_tags(self, args):
+        '''
+            Allows to add or remove tags to the selected title
+        '''
         func = getattr(args, 'action_func', None)
         if not func:
             return self.do_help('selected tags')
-        func(self, args)
+        return func(self, args)
 
     def tags_add(self, args):
+        '''
+            Adds tags to the selected title
+        '''
         Commands.add_tags(self.active_conn, args.tags)
 
     def tags_remove(self, args):
+        '''
+            Removes tags from the selected title
+        '''
         Commands.remove_tags(self.active_conn, args.tags)
 
     @need_creds
-    def selected_download(self, args):
+    def selected_download(self, _):
+        '''
+            Downloads the media
+        '''
         Commands.download(self.active_conn)
 
     @need_admin
-    def selected_remove(self, args):
+    def selected_remove(self, _):
+        '''
+            Remove the media
+        '''
         Commands.remove(self.active_conn)
 
     parsers.rename_parser.set_defaults(func=selected_rename)
@@ -590,18 +768,27 @@ use the command 'admin' to obtain them''')
     parsers.remove_tags.set_defaults(action_func=tags_remove)
 
     def shutdown(self):
+        '''
+            Destroys the active communicator if it exists
+        '''
         if self.active_conn.communicator is not None:
             self.active_conn.communicator.destroy()
 
     @cmd2.with_argparser(parsers.upload_parser)
     @need_admin
     def do_upload(self, args):
+        '''
+            Uploads a file to a file provider
+        '''
         if not os.path.isfile(args.file):
             self.perror("Input file doesn't exists")
             return
         Commands.upload(self.active_conn, args.file)
 
-    def _generate_prompt(self):
+    def get_prompt(self):
+        '''
+            Generates the cmd prompt
+        '''
         media = '-#'
         title = self.session.selected_title
         if title is not None:
@@ -619,8 +806,8 @@ use the command 'admin' to obtain them''')
             color = COLORS.USER
         return cmd2.ansi.style(f'{raw_text}', fg=color.value)
 
-    def postcmd(self, stop, line):
-        self.prompt = self._generate_prompt()
+    def postcmd(self, stop, _):
+        self.prompt = self.get_prompt()
         return stop
 
     def onecmd(self, *args, **kwargs):
@@ -645,6 +832,7 @@ use the command 'admin' to obtain them''')
         except Exception as exception:
             self.perror('An unexpected error has occurred')
             self.pexcept(exception)
+        return None
 
     def perror(self, msg: str = '', *, end: str = '\n', apply_style: bool = True) -> None:
         return super().perror(msg, end=end, apply_style=apply_style)
