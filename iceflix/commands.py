@@ -164,7 +164,7 @@ class PartiaMedia:
 
     def __str__(self) -> str:
         name = f'name: {self.name}' if self.name is not None else None
-        tags_list = ','.join(self.tags)
+        tags_list = ','.join(self.tags) if self.tags is not None else None
         tags = f'tags: {tags_list}' if self.tags is not None else None
         data = ' -> '.join([string for string in [name, tags] if string is not None])
         media_data = 'A new media' if not data else data
@@ -503,7 +503,9 @@ class CliHandler(cmd2.Cmd):
     def __init__(self) -> None:
         self.active_conn = ActiveConnection(self)
         self.session = Session()
-        super().__init__()
+        shortcuts = dict(cmd2.DEFAULT_SHORTCUTS)
+        shortcuts.update({'sudo': 'admin'})
+        super().__init__(shortcuts=shortcuts)
 
         self.debug = True
 
@@ -562,6 +564,7 @@ use the command 'admin' to obtain them''')
         return self.read_input(f'{prompt} [Yy/Nn]: ').lower() == "y"
 
     @cmd2.with_argparser(parsers.reconnect_parser)
+    @cmd2.with_category("Utility")
     def do_reconnect(self, args):
         '''
             Reconnect to the main service, can be given a proxy
@@ -569,6 +572,7 @@ use the command 'admin' to obtain them''')
         prx = self.active_conn.proxy if args.proxy is None else args.proxy
         Commands.stablish_connection_main(self.active_conn, prx)
 
+    @cmd2.with_category("Utility")
     def do_disconnect(self, _):
         '''
             Closes the connection to the main service, doesn't end the program execution
@@ -576,6 +580,7 @@ use the command 'admin' to obtain them''')
         self.active_conn.main = None
         self.session.make_user()
 
+    @cmd2.with_category("Utility")
     def do_logout(self, _):
         '''
             Disconnects from the current user and allows to authenticate again
@@ -591,6 +596,7 @@ use the command 'admin' to obtain them''')
             return True
 
     @cmd2.with_argparser(parsers.cat_base)
+    @cmd2.with_category("Titles retrieving")
     def do_catalog(self, args):
         '''
             Catalog related set of commands
@@ -642,6 +648,7 @@ use the command 'admin' to obtain them''')
     parsers.cat_tags.set_defaults(search_func=search_tags)
 
     @cmd2.with_argparser(parsers.admin_parser)
+    @cmd2.with_category("Utility")
     def do_admin(self, args):
         '''
             Transforms the user to admin
@@ -671,6 +678,7 @@ use the command 'admin' to obtain them''')
                     self.session.make_user()
         return None
 
+    @cmd2.with_category("Utility")
     def do_exit(self, _):
         '''
             If the user is an admin removes permissions, if not the program ends
@@ -680,6 +688,7 @@ use the command 'admin' to obtain them''')
         return self.session.make_user()
 
     @cmd2.with_argparser(parsers.users_parser_base)
+    @cmd2.with_category("User management")
     @need_admin
     def do_users(self, args):
         '''
@@ -706,6 +715,7 @@ use the command 'admin' to obtain them''')
     parsers.users_remove.set_defaults(func=users_remove)
 
     @cmd2.with_argparser(parsers.selected_parser_base)
+    @cmd2.with_category("Title management")
     @need_selected
     def do_selected(self, args):
         '''
@@ -775,6 +785,7 @@ use the command 'admin' to obtain them''')
             self.active_conn.communicator.destroy()
 
     @cmd2.with_argparser(parsers.upload_parser)
+    @cmd2.with_category("Title management")
     @need_admin
     def do_upload(self, args):
         '''

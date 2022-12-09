@@ -38,7 +38,7 @@ class FileUploaderApp(Ice.Application):
         self.adapter = None
         self.cast = None
 
-    def main(self, _, configFile=None, initData=None):
+    def main(self, _=None, configFile=None, initData=None):
         return super().main(['File Uploader'], configFile, initData)
 
     def run(self, _):
