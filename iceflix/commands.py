@@ -248,16 +248,17 @@ class Commands:
         '''
             Connects to the authentication services and authenticate the user
         '''
+        retries = conn.communicator.getProperties().getPropertyAsIntWithDefault('LoginRetries', MAX_TRIES)
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
         password_hash = sha256(password.encode('utf-8')).hexdigest()
         session = Session(username, password_hash)
         try:
-            for i in range(1, MAX_TRIES + 1):
+            for i in range(1, retries + 1):
                 try:
                     session.refresh(conn)
                 except IceFlix.TemporaryUnavailable as temporary_error:
-                    if not i == MAX_TRIES:
+                    if not i == retries:
                         conn.terminal.pwarning(
                             f"({i}) Couldn't connect. Trying again in 5 seconds")
                         sleep(5)
@@ -417,7 +418,8 @@ class Commands:
             If used at the beginning of a command, the user first becomes an admin,
             executes the command as admin and then the user loses its admin status
         '''
-        admin_pass = getpass('Admin password: ')
+        config_admin_pass = conn.communicator.getProperties().getProperty('AdminToken')
+        admin_pass = getpass('Admin password: ') if not config_admin_pass else config_admin_pass
         admin_sha256_pass = sha256(admin_pass.encode('utf-8')).hexdigest()
         auth = conn.get_authenticator()
         if not auth.isAdmin(admin_sha256_pass):
