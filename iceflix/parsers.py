@@ -1,3 +1,7 @@
+'''
+    Contains parsers used by the CLI to handle commands
+'''
+
 import sys
 import cmd2
 

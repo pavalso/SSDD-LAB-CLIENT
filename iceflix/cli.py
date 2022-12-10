@@ -3,44 +3,12 @@
 import logging
 import sys
 
-from iceflix.main import MainApp
-from iceflix.authenticator import AuthenticatorApp
-from iceflix.catalog import MediaCatalogApp
-from iceflix.FileService import FileServiceApp
-#from iceflix.client import client_main
+from iceflix.client import client_main
 
 
 def setup_logging():
     """Configure the logging."""
     logging.basicConfig(level=logging.DEBUG)
-
-
-def main_service():
-    """Handles the `mainservice` CLI command."""
-    setup_logging()
-    logging.info("Main service starting...")
-    sys.exit(MainApp().main(sys.argv))
-
-
-def catalog_service():
-    """Handles the `catalogservice` CLI command."""
-    setup_logging()
-    logging.info("Media catalog service starting...")
-    sys.exit(MediaCatalogApp().main(sys.argv))
-
-
-def streamprovider_service():
-    """Handles the `streamingservice` CLI command."""
-    logging.info("Streaming service starting...")
-    sys.exit(FileServiceApp().main(sys.argv))
-
-
-def authentication_service():
-    """Handles the `authenticationservice` CLI command."""
-    setup_logging()
-    logging.info("Authentication service starting...")
-    sys.exit(AuthenticatorApp().main(sys.argv))
-
 
 def client():
     """Handles the IceFlix client CLI command."""
