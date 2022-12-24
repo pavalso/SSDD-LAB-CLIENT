@@ -1,17 +1,23 @@
 """Submodule containing the CLI command handlers."""
 
 import logging
-import sys
 
 from iceflix.client import client_main
 
 
+LOG_FORMAT = '%(asctime)s - %(levelname)-7s - %(module)s:%(funcName)s:%(lineno)d - %(message)s'
+
+
 def setup_logging():
     """Configure the logging."""
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format=LOG_FORMAT,
+    )
 
 def client():
     """Handles the IceFlix client CLI command."""
-    print("Starting IceFlix client...")
+    setup_logging()
+    logging.info("Starting IceFlix client...")
     client_main()
-    sys.exit(0)
+    return 0

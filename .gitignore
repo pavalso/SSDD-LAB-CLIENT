@@ -3,3 +3,11 @@ venv
 __pycache__
 build
 IceFlix_Template.egg-info
+
+.coverage
+.tox
+
+*.egg-info
+*~
+*.pyc
+.python-version
