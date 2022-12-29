@@ -2,6 +2,6 @@
 
 # TODO: Remove the services you don't need
 iceflix-main --Ice.Config=configs/main.config
-#iceflix-catalog --Ice.Config=configs/catalog.config &
+#iceflix-catalog --Ice.Config=configs/catalog.config
 #iceflix-authenticator --Ice.Config=configs/authenticator.config
 #iceflix-streamprovider --Ice.Config=configs/fileservice.config

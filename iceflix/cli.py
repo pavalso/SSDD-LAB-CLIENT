@@ -38,3 +38,19 @@ def authenticator():
     logging.info("Starting IceFlix authenticator...")
     AuthenticatorApp().main(sys.argv)
     return 0
+
+def catalog():
+    from iceflix.catalog import CatalogApp
+    import sys
+    setup_logging()
+    logging.info("Starting IceFlix catalog...")
+    CatalogApp().main(sys.argv)
+    return 0
+
+def fileservice():
+    from iceflix.file_service import FileServiceApp
+    import sys
+    setup_logging()
+    logging.info("Starting IceFlix FileService...")
+    FileServiceApp().main(sys.argv)
+    return 0

@@ -42,7 +42,6 @@ class Main(IceFlix.Main, IceFlix.Announcement):
         auth = IceFlix.AuthenticatorPrx.checkedCast(service)
         if auth is not None:
             self.authenticator = auth
-            print(self.authenticator)
         cat = IceFlix.MediaCatalogPrx.checkedCast(service)
         if cat is not None:
             self.catalog = cat

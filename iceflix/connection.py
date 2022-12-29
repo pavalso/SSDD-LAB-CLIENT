@@ -77,10 +77,3 @@ class ConnectionCheckerApp(Ice.Application):
     def disconnect(self):
         self._unsubscribe()
         self.servant._conn_ref.main = None
-
-if __name__ == "__main__":
-    with Ice.initialize() as comm:
-        server = ConnectionCheckerApp(comm)
-        server.main()
-        server.subscribe_to_proxy("IceStorm/TopicManager -t:tcp -h localhost -p 10000")
-        input()
