@@ -7,6 +7,8 @@ import sys
 import os
 import Ice
 
+import cmd2.exceptions
+
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 
 try:
@@ -23,8 +25,8 @@ def client_main():
 
     try:
         cmd.terminal_lock.acquire()
-        while not cmd.active_conn.reachable:
-            prx = cmd.read_input('Connection proxy: ')
+        while not cmd.active_conn.reachable.is_set():
+            prx = cmd.read_input('Connection proxy: ').replace('\"', '')
             cmd.onecmd(f'reconnect -p "{prx}"')
         cmd.terminal_lock.release()
 

@@ -5,7 +5,8 @@
 # pylint: disable=import-error, wrong-import-position, no-member, ungrouped-imports
 
 from enum import Enum
-from threading import Timer, Thread
+from threading import Event, current_thread, main_thread
+
 from dataclasses import dataclass, field
 from getpass import getpass
 from hashlib import sha256
@@ -15,6 +16,11 @@ try:
     from file_uploader import FileUploaderApp
 except ImportError:
     from iceflix.file_uploader import FileUploaderApp
+
+try:
+    from connection import ConnectionCheckerApp
+except ImportError:
+    from iceflix.connection import ConnectionCheckerApp
 
 
 import os
@@ -60,7 +66,7 @@ class ActiveConnection:
     _main = None
     proxy : str = None
 
-    reachable : bool = False
+    reachable = Event()
     remote : str = '-'
 
     @property
@@ -72,35 +78,37 @@ class ActiveConnection:
 
     @main.setter
     def main(self, new):
+        if self._main == new:
+            return
         self._main = new
-        self.reachable = new is not None
-        if self.reachable:
+        if new is not None:
+            self.reachable.set()
             self.remote = new.ice_getConnection().getEndpoint().getInfo().host
         else:
+            self.reachable.clear()
             self.remote = '-'
+        if current_thread() == main_thread():
+            return self.__set_prompt()
+        return self.__async_set_prompt()
 
-    def __post_init__(self) -> None:
-        self.communicator = Ice.initialize(sys.argv)
-        Thread(target=self._periodic_check, daemon=True).start()
+    def __set_prompt(self):
+        self.terminal.prompt = self.terminal.get_prompt()
 
-    def _periodic_check(self):
-        while True:
-            _timer = Timer(interval=5, function=self._conn_check)
-            _timer.start()
-            _timer.finished.wait()
-
-    def _conn_check(self):
-        try:
-            if self.main:
-                self.main.ice_ping()
-                self.reachable = True
-            else:
-                self.reachable = False
-        except (Ice.ConnectFailedException, Ice.ConnectionRefusedException, Ice.ObjectNotExistException):
-            self.reachable = False
+    def __async_set_prompt(self):
         if self.terminal.terminal_lock.acquire(blocking=False):
             self.terminal.async_update_prompt(self.terminal.get_prompt())
             self.terminal.terminal_lock.release()
+
+    def __post_init__(self) -> None:
+        self.communicator = Ice.initialize(sys.argv)
+        self._conn_check = ConnectionCheckerApp(self.communicator, self)
+        self._conn_check.main()
+    
+    def connect_topic_manager(self, topic_proxy: str) -> None:
+        self._conn_check.subscribe_to_proxy(topic_proxy)
+
+    def disconnect_topic_manager(self) -> None:
+        self._conn_check.disconnect()
 
     @staticmethod
     def needs_main(func):
@@ -108,7 +116,7 @@ class ActiveConnection:
             Only runs the command if the main server is reachable
         '''
         def wrapper(self, *args, **kwargs):
-            if not self.reachable:
+            if not self.reachable.is_set():
                 raise NoMainError
             return func(self, *args, **kwargs)
         return wrapper
@@ -226,21 +234,18 @@ class Commands:
             return conn.terminal.perror("Proxy can't be empty")
 
         try:
-            base = conn.communicator.stringToProxy(proxy)
-            main = IceFlix.MainPrx.checkedCast(base)
+            conn.connect_topic_manager(proxy)
+            if not conn.reachable.wait(timeout=20):
+                return conn.terminal.perror('No main service available')
+            conn.proxy = proxy
+            conn.terminal.poutput('Connection stablished')
+            return conn
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
         except Ice.NoEndpointException:
             conn.terminal.perror('Proxy needs an endpoint')
         except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
             conn.terminal.perror(parse_exception.str)
-        else:
-            conn.main = main
-            conn.proxy = proxy
-            conn.terminal.prompt = conn.terminal.get_prompt()
-            conn.terminal.poutput('Connection stablished')
-            return conn
-        return None
 
     @staticmethod
     @ActiveConnection.needs_main
@@ -579,7 +584,7 @@ use the command 'admin' to obtain them''')
         '''
             Closes the connection to the main service, doesn't end the program execution
         '''
-        self.active_conn.main = None
+        self.active_conn.disconnect_topic_manager()
         self.session.make_user()
 
     @cmd2.with_category("Utility")
@@ -809,7 +814,7 @@ use the command 'admin' to obtain them''')
         media = cmd2.ansi.style(media, fg=COLOR_SELECTED_TITLE)
         remote = self.active_conn.remote
         raw_text = f'{self.session.display_name}@{remote}:{media} '
-        if not self.active_conn.reachable:
+        if not self.active_conn.reachable.is_set():
             color = COLORS.DISCONNECTED
         elif self.session.is_admin:
             color = COLORS.ADMIN

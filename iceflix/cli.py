@@ -21,3 +21,20 @@ def client():
     logging.info("Starting IceFlix client...")
     client_main()
     return 0
+
+def main():
+    """Handles the IceFlix client CLI command."""
+    from iceflix.main import MainApp
+    import sys
+    setup_logging()
+    logging.info("Starting IceFlix main...")
+    MainApp().main(sys.argv)
+    return 0
+
+def authenticator():
+    from iceflix.authenticator import AuthenticatorApp
+    import sys
+    setup_logging()
+    logging.info("Starting IceFlix authenticator...")
+    AuthenticatorApp().main(sys.argv)
+    return 0
