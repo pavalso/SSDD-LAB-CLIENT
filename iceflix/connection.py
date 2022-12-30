@@ -37,7 +37,6 @@ class ConnectionCheckerApp(Ice.Application):
         self.servant = ConnectionCheckerServant(conn_ref)
         self.proxy = None
         self.adapter = None
-        self.cast = None
         self._topic = None
 
     def main(self, _=None, configFile=None, initData=None):

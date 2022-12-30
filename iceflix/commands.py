@@ -22,6 +22,10 @@ try:
 except ImportError:
     from iceflix.connection import ConnectionCheckerApp
 
+try:
+    import event_listener
+except ImportError:
+    import iceflix.event_listener
 
 import os
 import sys
@@ -262,6 +266,8 @@ class Commands:
             for i in range(1, retries + 1):
                 try:
                     session.refresh(conn)
+                    conn.terminal.session = session
+                    return
                 except IceFlix.TemporaryUnavailable as temporary_error:
                     if not i == retries:
                         conn.terminal.pwarning(
@@ -271,8 +277,6 @@ class Commands:
                         raise IceFlix.TemporaryUnavailable from temporary_error
         except IceFlix.Unauthorized:
             conn.terminal.perror('Wrong username/password combination')
-        else:
-            conn.terminal.session = session
 
     @staticmethod
     def get_catalog_name(conn : ActiveConnection, name : str, exact : bool):
@@ -370,8 +374,9 @@ class Commands:
         '''
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
-        tags = list(set(title.tags).difference(tags))
-        title.tags = None if not tags else tags
+        if title.tags is not None:
+            new_tags = list(set(title.tags).difference(tags))
+            title.tags = None if not new_tags else new_tags
         catalog.removeTags(title.id, tags, conn.terminal.session.token)
 
     @staticmethod
@@ -802,6 +807,30 @@ use the command 'admin' to obtain them''')
             self.perror("Input file doesn't exists")
             return
         Commands.upload(self.active_conn, args.file)
+
+    @cmd2.with_argparser(parsers.analyzer_parser)
+    @cmd2.with_category("Utility")
+    @need_admin
+    def do_analyzetopics(self, args):
+        '''
+            Allows an administrator user to see what's happening at any topic channel used by IceFlix 
+        '''
+        self.pfeedback(f"Listening events from '{self.active_conn.proxy}'")
+        if args.topics:
+            topics = args.topics
+        if args.all or not args.topics:
+            topics = list(event_listener.AvailableTopic)
+        topics = list(set(topics).difference(args.ignore))
+        stopics = ', '.join(topics)
+        self.poutput(f'Listening topics: {stopics}')
+        self.pwarning('\nctrl+c to stop\n')
+        self.poutput('-------------- Listening for events -------------')
+        if not topics:
+            self.pwarning('[!] Empty topic list, no event will be received')
+        with event_listener.EventListenerApp(self.active_conn.proxy) as listener:
+            for topic in topics:
+                listener.subscribe(topic)
+            listener.waitForShutdown()
 
     def get_prompt(self):
         '''

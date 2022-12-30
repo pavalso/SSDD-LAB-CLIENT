@@ -16,9 +16,13 @@ catalog = None
 fileService = None
 
 
+user_update = None
+id = 0
+
 class Authenticator(IceFlix.Authenticator):
     def refreshAuthorization(self, user, passwordHash, context):
         #raise IceFlix.Unauthorized
+        user_update.newToken(user, 'SECRET_TOKEN', id)
         return 'SECRET_TOKEN'
 
     def isAuthorized(userToken):
@@ -32,11 +36,13 @@ class Authenticator(IceFlix.Authenticator):
         return adminToken == sha256(b'secret').hexdigest()
     
     def addUser(self, user, passwordHash, adminToken, context):
+        user_update.newUser(user, passwordHash, id)
         return
         raise IceFlix.Unauthorized() 
         raise IceFlix.TemporaryUnavailable()
     
-    def removeUser(self, user, adminToken, context): 
+    def removeUser(self, user, adminToken, context):
+        user_update.removeUser(user, id)
         return
         raise IceFlix.Unauthorized()
         raise IceFlix.TemporaryUnavailable()
@@ -45,11 +51,13 @@ class AuthenticatorApp(Ice.Application):
     """Example Ice.Application for a Main service."""
 
     def __init__(self):
+        global id
         super().__init__()
         self.servant = Authenticator()
         self.proxy = None
         self.adapter = None
         self.id = secrets.token_hex(16)
+        id = self.id
 
     def announce_self(self):
         from time import sleep
@@ -61,6 +69,7 @@ class AuthenticatorApp(Ice.Application):
 
     def run(self, args):
         """Run the application, adding the needed objects to the adapter."""
+        global user_update
         logging.info("Running Auth application")
         comm = self.communicator()
         self.adapter = comm.createObjectAdapter("AuthenticatorAdapter")
@@ -83,6 +92,14 @@ class AuthenticatorApp(Ice.Application):
             self.topic = topic_manager.retrieve(topic_name)
 
         Thread(target=self.announce_self, daemon=True).start()
+
+        topic_name = "UserUpdates"
+        try:
+            ouput_events = topic_manager.create(topic_name)
+        except IceStorm.TopicExists:
+            ouput_events = topic_manager.retrieve(topic_name)
+        publisher = ouput_events.getPublisher()
+        user_update = IceFlix.UserUpdatePrx.uncheckedCast(publisher)
 
         self.shutdownOnInterrupt()
         comm.waitForShutdown()
