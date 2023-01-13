@@ -5,7 +5,10 @@
 import sys
 import cmd2
 
-from event_listener import AvailableTopic
+try:
+    from event_listener import AvailableTopic
+except ImportError:
+    from iceflix.event_listener import AvailableTopic
 
 
 reconnect_parser = cmd2.Cmd2ArgumentParser()

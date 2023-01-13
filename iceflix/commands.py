@@ -25,10 +25,11 @@ except ImportError:
 try:
     import event_listener
 except ImportError:
-    import iceflix.event_listener
+    import iceflix.event_listener as event_listener
 
 import os
 import sys
+import logging
 
 import Ice
 import cmd2
@@ -72,6 +73,7 @@ class ActiveConnection:
 
     reachable = Event()
     remote : str = '-'
+    _conn_check: ConnectionCheckerApp = None
 
     @property
     def main(self):
@@ -87,10 +89,8 @@ class ActiveConnection:
         self._main = new
         if new is not None:
             self.reachable.set()
-            self.remote = new.ice_getConnection().getEndpoint().getInfo().host
         else:
             self.reachable.clear()
-            self.remote = '-'
         if current_thread() == main_thread():
             return self.__set_prompt()
         return self.__async_set_prompt()
@@ -109,9 +109,12 @@ class ActiveConnection:
         self._conn_check.main()
     
     def connect_topic_manager(self, topic_proxy: str) -> None:
+        self.main = None
         self._conn_check.subscribe_to_proxy(topic_proxy)
+        self.remote = self._conn_check._topic.ice_getConnection().getEndpoint().getInfo().host
 
     def disconnect_topic_manager(self) -> None:
+        self.remote = '-'
         self._conn_check.disconnect()
 
     @staticmethod
@@ -130,21 +133,30 @@ class ActiveConnection:
         '''
             Retrieves an authenticator from the main server
         '''
-        return self.main.getAuthenticator()
+        logging.info('Obtaining an authenticator from main server...')
+        authenticator = self.main.getAuthenticator()
+        logging.debug('Got authenticator proxy %s', authenticator)
+        return authenticator
 
     @needs_main
     def get_catalog(self):
         '''
             Retrieves a catalog from the main server
         '''
-        return self.main.getCatalog()
+        logging.info('Obtaining a catalog from main server...')
+        catalog = self.main.getCatalog()
+        logging.debug('Got catalog proxy %s', catalog)
+        return catalog
 
     @needs_main
     def get_file_service(self):
         '''
             Retrieves a file service from the main server
         '''
-        return self.main.getFileService()
+        logging.info('Obtaining a file service from main server...')
+        file_service = self.main.getFileService()
+        logging.debug('Got file service proxy %s', file_service)
+        return file_service
 
 @dataclass
 class PartiaMedia:
@@ -165,13 +177,16 @@ class PartiaMedia:
 
         session = conn.terminal.session
         if session.is_anon:
+            logging.warning("Can't fetch media if the user is anon")
             return None
 
-        media = catalog.getTile(self.id, conn.terminal.session.token)
+        logging.info('Fetching tile %s from the catalog', self.id)
+        media = catalog.getTile(self.id, session.token)
         if media.info:
             self.name = media.info.name
             self.tags = media.info.tags
         self.media = media
+        logging.debug('Got tile: %s', self)
         return self.media
 
     def __str__(self) -> str:
@@ -206,6 +221,8 @@ class Session:
         '''
         self.admin_pass = admin_password
         self.is_admin = True
+        logging.info('%s is now an admin', self.user)
+        logging.debug('Using admin token %s', self.admin_pass)
 
     def make_user(self):
         '''
@@ -213,15 +230,18 @@ class Session:
         '''
         self.admin_pass = None
         self.is_admin = False
+        logging.info('%s is now an user', self.user)
 
     def refresh(self, conn : ActiveConnection):
         '''
             Tries to obtain a new token from the authentication services
         '''
         auth = conn.get_authenticator()
+        logging.info('Trying to get a token from the authentication services...')
         token = auth.refreshAuthorization(self.user, self.pass_hash)
         self.token = token
         self.is_anon = self.token is None
+        logging.debug("This session is using token: '%s'", self.token if not self.is_anon else 'No token')
         return self
 
 class Commands:
@@ -239,7 +259,7 @@ class Commands:
 
         try:
             conn.connect_topic_manager(proxy)
-            if not conn.reachable.wait(timeout=20):
+            if not conn.reachable.wait(timeout=12):
                 return conn.terminal.perror('No main service available')
             conn.proxy = proxy
             conn.terminal.poutput('Connection stablished')
@@ -250,7 +270,7 @@ class Commands:
             conn.terminal.perror('Proxy needs an endpoint')
         except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
             conn.terminal.perror(parse_exception.str)
-
+    
     @staticmethod
     @ActiveConnection.needs_main
     def login(conn : ActiveConnection):
@@ -516,6 +536,7 @@ class CliHandler(cmd2.Cmd):
         self.active_conn = ActiveConnection(self)
         self.session = Session()
         shortcuts = dict(cmd2.DEFAULT_SHORTCUTS)
+
         shortcuts.update({'sudo': 'admin'})
         super().__init__(shortcuts=shortcuts)
 
@@ -793,6 +814,8 @@ use the command 'admin' to obtain them''')
         '''
             Destroys the active communicator if it exists
         '''
+        if self.active_conn._conn_check is not None:
+            self.active_conn.disconnect_topic_manager()
         if self.active_conn.communicator is not None:
             self.active_conn.communicator.destroy()
 
@@ -815,18 +838,18 @@ use the command 'admin' to obtain them''')
         '''
             Allows an administrator user to see what's happening at any topic channel used by IceFlix 
         '''
-        self.pfeedback(f"Listening events from '{self.active_conn.proxy}'")
-        if args.topics:
-            topics = args.topics
-        if args.all or not args.topics:
+        topics = args.topics if args.topics is not None else []
+        if args.all:
             topics = list(event_listener.AvailableTopic)
         topics = list(set(topics).difference(args.ignore))
-        stopics = ', '.join(topics)
+        if not topics:
+            self.pwarning('[!] Empty topic list, showing help')
+            return self.do_help('analyzetopics')
+        stopics = ', '.join(topics) if topics else '-'
+        self.pfeedback(f"Listening events from '{self.active_conn.proxy}'")
         self.poutput(f'Listening topics: {stopics}')
         self.pwarning('\nctrl+c to stop\n')
         self.poutput('-------------- Listening for events -------------')
-        if not topics:
-            self.pwarning('[!] Empty topic list, no event will be received')
         with event_listener.EventListenerApp(self.active_conn.proxy) as listener:
             for topic in topics:
                 listener.subscribe(topic)
@@ -883,22 +906,3 @@ use the command 'admin' to obtain them''')
 
     def perror(self, msg: str = '', *, end: str = '\n', apply_style: bool = True) -> None:
         return super().perror(msg, end=end, apply_style=apply_style)
-
-def show_logo():
-    '''Prints in screen the app logo'''
-    logo = r"""
- ██▓ ▄████▄  ▓█████   █████▒██▓     ██▓▒██   ██▒
-▓██▒▒██▀ ▀█  ▓█   ▀ ▓██   ▒▓██▒    ▓██▒▒▒ █ █ ▒░
-▒██▒▒▓█    ▄ ▒███   ▒████ ░▒██░    ▒██▒░░  █   ░
-░██░▒▓▓▄ ▄██▒▒▓█  ▄ ░▓█▒  ░▒██░    ░██░ ░ █ █ ▒
-░██░▒ ▓███▀ ░░▒████▒░▒█░   ░██████▒░██░▒██▒ ▒██▒
-░▓  ░ ░▒ ▒  ░░░ ▒░ ░ ▒ ░   ░ ▒░▓  ░░▓  ▒▒ ░ ░▓ ░
- ▒ ░  ░  ▒    ░ ░  ░ ░     ░ ░ ▒  ░ ▒ ░░░   ░▒ ░
- ▒ ░░           ░    ░ ░     ░ ░    ▒ ░ ░    ░
- ░  ░ ░         ░  ░           ░  ░ ░   ░    ░
-    ░
-"""
-    ascii_msg = cmd2.ansi.style(logo, fg=cmd2.ansi.RgbFg(175,200,255))
-    print(
-        ascii_msg
-    )

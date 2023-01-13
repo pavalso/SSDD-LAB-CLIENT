@@ -78,7 +78,7 @@ class MainApp(Ice.Application):
         print(self.proxy)
 
         topic_manager = IceStorm.TopicManagerPrx.checkedCast(
-            comm.stringToProxy("IceStorm/TopicManager -t:tcp -h localhost -p 10000"),
+            comm.stringToProxy("IceStorm/TopicManager -t:tcp -h 192.168.1.204 -p 10000"),
         )
 
         if not topic_manager:
