@@ -5,6 +5,7 @@
 # pylint: disable=import-error, wrong-import-position, consider-using-with
 
 import os
+import logging
 
 import Ice
 
@@ -17,16 +18,19 @@ class FileUploader(IceFlix.FileUploader):
     def __init__(self, file) -> None:
         super().__init__()
         self.file_pointer = open(file, 'rb')
+        logging.info('Sending file: %s', file)
 
     def receive(self, size, _):
         '''Gets size bytes from the file and returns them'''
-        return self.file_pointer.read(size)
+        raw = self.file_pointer.read(size)
+        logging.debug('%s', raw)
 
     def close(self, _):
         '''Closes the file and shutdowns the uploader'''
         if self.file_pointer.closed:
             return
         self.file_pointer.close()
+        logging.info('Close received')
 
 class FileUploaderApp(Ice.Application):
     '''Manages the file transfer'''

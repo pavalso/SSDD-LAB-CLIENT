@@ -305,17 +305,18 @@ class Commands:
         '''
         catalog = conn.get_catalog()
 
+        logging.info('Fetching tiles %s %s', 'EXACT' if exact else 'NOT EXACT', name)
         titles = catalog.getTilesByName(name, exact)
+        logging.info('Got %d tiles', len(titles))
         if not titles:
             if exact:
                 conn.terminal.perror(f'None of the media is titled: {name}')
             else:
                 conn.terminal.perror(f'None of the media contains: {name}')
             return
-        pmedia = PartiaMedia(titles[0], name=name)
-        buffer = {pmedia.id: pmedia}
-        Commands.save_pmedia(conn, buffer)
-        Commands.show_titles(conn, buffer)
+        pmedia = {_id: PartiaMedia(_id, name=name) for _id in titles}
+        Commands.save_pmedia(conn, pmedia)
+        Commands.show_titles(conn, pmedia)
 
     @staticmethod
     def get_catalog_tags(conn : ActiveConnection, tags : list[str], include_all : bool):
@@ -324,7 +325,9 @@ class Commands:
         '''
         catalog = conn.get_catalog()
 
+        logging.info('Fetching tiles %s %s', 'INCLUDE ALL' if include_all else 'NOT INCLUDE ALL', tags)
         titles = catalog.getTilesByTags(tags, include_all, conn.terminal.session.token)
+        logging.info('Got %d tiles', len(titles))
         if not titles:
             title_tags = ', '.join(tags)
             if include_all:
@@ -359,6 +362,7 @@ class Commands:
             updated.name = cached.name if updated.name is None else updated.name
             updated.tags = cached.tags if updated.tags is None else updated.tags
 
+        logging.debug('Saved tiles: %s', media)
         conn.terminal.session.cached_titles.update(media)
 
     @staticmethod
@@ -386,6 +390,7 @@ class Commands:
         title.tags.extend(tags)
         title.tags = list(set(title.tags))
         catalog.addTags(title.id, tags, conn.terminal.session.token)
+        logging.debug('Added tags to %s: %s', title.id, tags)
 
     @staticmethod
     def remove_tags(conn : ActiveConnection, tags : list[str]):
@@ -398,6 +403,7 @@ class Commands:
             new_tags = list(set(title.tags).difference(tags))
             title.tags = None if not new_tags else new_tags
         catalog.removeTags(title.id, tags, conn.terminal.session.token)
+        logging.debug('Removed tags from %s: %s', title.id, tags)
 
     @staticmethod
     def download(conn : ActiveConnection):
@@ -414,6 +420,8 @@ class Commands:
             conn.terminal.perror("The title selected couldn't be downloaded")
             return
 
+        logging.debug('Downloading from: %s', media.provider)
+
         session = conn.terminal.session
         handler = title.media.provider.openFile(title.id, session.token)
         with conn.terminal.terminal_lock:
@@ -426,17 +434,21 @@ class Commands:
                             raw = handler.receive(2048, session.token)
                             if not raw:
                                 break
+                            logging.debug('%s', raw)
                             file.write(raw)
                         except IceFlix.Unauthorized:
+                            logging.info('User token got rejected while downloading, refreshing...')
                             session.refresh(conn)
                 except IceFlix.Unauthorized as unauthorized_error:
+                    logging.info("Couldn't get a new valid user token, reverting download")
                     os.remove(title.name)
                     raise IceFlix.Unauthorized from unauthorized_error
                 else:
                     time_end = perf_counter_ns()
-                    final_time = time_end - time_initial
+                    final_time = (time_end - time_initial) / 10**9
+                    logging.info('Download finished in %.2f seconds', final_time)
                     conn.terminal.poutput(
-                        f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds"
+                        f"Finished downloading: '{title.name}' in {final_time:.2f} seconds"
                         )
                     handler.close(session.token)
 
@@ -466,6 +478,7 @@ class Commands:
         auth = conn.get_authenticator()
         password_hash = sha256(password.encode('utf-8')).hexdigest()
         auth.addUser(user, password_hash, conn.terminal.session.admin_pass)
+        logging.debug('User %s with password hash %s created', user, password_hash)
         conn.terminal.poutput(f'Added user {user}')
 
     @staticmethod
@@ -475,6 +488,7 @@ class Commands:
         '''
         auth = conn.get_authenticator()
         auth.removeUser(user, conn.terminal.session.admin_pass)
+        logging.debug('User %s removed', user)
         conn.terminal.poutput(f'Removed user {user}')
 
     @staticmethod
@@ -486,6 +500,7 @@ class Commands:
         catalog = conn.get_catalog()
         catalog.renameTile(title.id, name, conn.terminal.session.admin_pass)
         title.name = name
+        logging.debug('Title %s renamed to %s', title.id, name)
         conn.terminal.poutput(f'Title renamed to {name}')
 
     @staticmethod
@@ -503,9 +518,12 @@ class Commands:
             conn.terminal.perror("The title selected couldn't be deleted, no provider associated")
             return
 
+        logging.info('Removing tile %s', title.id)
+
         media.provider.removeFile(title.id, conn.terminal.session.admin_pass)
         conn.terminal.session.cached_titles.pop(title.id)
         conn.terminal.session.selected_title = None
+        logging.debug('Removed tile %s from %s',  title.id, media.provider)
         conn.terminal.poutput(f'Removed {title.name}')
 
     @staticmethod

@@ -44,7 +44,7 @@ class Catalog(IceFlix.MediaCatalog):
 
     def getTilesByName(self, name, exact, context):
         if name == 'gola':
-            return ['1']
+            return ['1', '2']
         return []
 
     def getTilesByTags(self, tags, includeAllTags, userToken, context):
