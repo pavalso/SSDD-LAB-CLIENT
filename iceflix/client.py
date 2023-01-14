@@ -53,6 +53,8 @@ def client_main():
         cmd.prompt = cmd.get_prompt()
 
         cmd.cmdloop()
+    except (KeyboardInterrupt, EOFError):
+        pass
     finally:
         cmd.shutdown()
 
