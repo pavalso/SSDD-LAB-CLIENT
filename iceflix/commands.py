@@ -2,10 +2,10 @@
     Cmd handling
 '''
 
-# pylint: disable=import-error, wrong-import-position, no-member, ungrouped-imports
+# pylint: disable=import-error, wrong-import-position, no-member
 
 from enum import Enum
-from threading import Event, current_thread, main_thread
+from threading import Event, current_thread, main_thread, Thread
 
 from dataclasses import dataclass, field
 from getpass import getpass
@@ -14,18 +14,14 @@ from time import sleep, perf_counter_ns
 
 try:
     from file_uploader import FileUploaderApp
+    from connection import ConnectionCheckerApp
+    import event_listener
+    import parsers
 except ImportError:
     from iceflix.file_uploader import FileUploaderApp
-
-try:
-    from connection import ConnectionCheckerApp
-except ImportError:
     from iceflix.connection import ConnectionCheckerApp
-
-try:
-    import event_listener
-except ImportError:
-    import iceflix.event_listener as event_listener
+    from iceflix import event_listener
+    from iceflix import parsers
 
 import os
 import sys
@@ -36,10 +32,7 @@ import cmd2
 
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
-try:
-    import parsers
-except ImportError:
-    from iceflix import parsers
+
 
 MAX_TRIES = 3
 
@@ -78,14 +71,16 @@ class ActiveConnection:
     @property
     def main(self):
         '''
-            Returns the main server proxy
+            Returns a main server proxy
         '''
+        self.main = self._conn_check.servant.get_main()
+        logging.debug('Selected main %s', self._main)
         return self._main
 
     @main.setter
     def main(self, new):
         if self._main == new:
-            return
+            return None
         self._main = new
         if new is not None:
             self.reachable.set()
@@ -94,6 +89,11 @@ class ActiveConnection:
         if current_thread() == main_thread():
             return self.__set_prompt()
         return self.__async_set_prompt()
+
+    def _check_conn(self):
+        while not sleep(10):
+            main = self._conn_check.servant.get_main()
+            self.main = main
 
     def __set_prompt(self):
         self.terminal.prompt = self.terminal.get_prompt()
@@ -107,13 +107,20 @@ class ActiveConnection:
         self.communicator = Ice.initialize(sys.argv)
         self._conn_check = ConnectionCheckerApp(self.communicator, self)
         self._conn_check.main()
-    
+        Thread(target=self._check_conn, daemon=True).start()
+
     def connect_topic_manager(self, topic_proxy: str) -> None:
+        '''
+            Connects to topic manager at topic_proxy
+        '''
         self.main = None
         self._conn_check.subscribe_to_proxy(topic_proxy)
         self.remote = self._conn_check._topic.ice_getConnection().getEndpoint().getInfo().host
 
     def disconnect_topic_manager(self) -> None:
+        '''
+            Disconnects from the connected topic manager
+        '''
         self.remote = '-'
         self._conn_check.disconnect()
 
@@ -123,7 +130,7 @@ class ActiveConnection:
             Only runs the command if the main server is reachable
         '''
         def wrapper(self, *args, **kwargs):
-            if not self.reachable.is_set():
+            if not self.reachable.is_set() or not self.main:
                 raise NoMainError
             return func(self, *args, **kwargs)
         return wrapper
@@ -241,7 +248,8 @@ class Session:
         token = auth.refreshAuthorization(self.user, self.pass_hash)
         self.token = token
         self.is_anon = self.token is None
-        logging.debug("This session is using token: '%s'", self.token if not self.is_anon else 'No token')
+        logging.debug("This session is using token: '%s'",
+            self.token if not self.is_anon else 'No token')
         return self
 
 class Commands:
@@ -270,7 +278,8 @@ class Commands:
             conn.terminal.perror('Proxy needs an endpoint')
         except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
             conn.terminal.perror(parse_exception.str)
-    
+        return None
+
     @staticmethod
     @ActiveConnection.needs_main
     def login(conn : ActiveConnection):
@@ -325,7 +334,7 @@ class Commands:
         '''
         catalog = conn.get_catalog()
 
-        logging.info('Fetching tiles %s %s', 'INCLUDE ALL' if include_all else 'NOT INCLUDE ALL', tags)
+        logging.info('Fetching %s %s', 'INCLUDE ALL' if include_all else 'NOT INCLUDE ALL', tags)
         titles = catalog.getTilesByTags(tags, include_all, conn.terminal.session.token)
         logging.info('Got %d tiles', len(titles))
         if not titles:
@@ -833,7 +842,10 @@ use the command 'admin' to obtain them''')
             Destroys the active communicator if it exists
         '''
         if self.active_conn._conn_check is not None:
-            self.active_conn.disconnect_topic_manager()
+            try:
+                self.active_conn.disconnect_topic_manager()
+            except Ice.ConnectionRefusedException:
+                pass
         if self.active_conn.communicator is not None:
             self.active_conn.communicator.destroy()
 
@@ -854,7 +866,8 @@ use the command 'admin' to obtain them''')
     @need_admin
     def do_analyzetopics(self, args):
         '''
-            Allows an administrator user to see what's happening at any topic channel used by IceFlix 
+            Allows an administrator user to see what's happening at
+            any topic channel used by IceFlix
         '''
         topics = args.topics if args.topics is not None else []
         if args.all:
@@ -872,6 +885,7 @@ use the command 'admin' to obtain them''')
             for topic in topics:
                 listener.subscribe(topic)
             listener.waitForShutdown()
+        return None
 
     def get_prompt(self):
         '''

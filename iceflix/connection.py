@@ -1,33 +1,68 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import Ice
-import IceStorm
+'''
+    Check whenever a main has announced through icestorm topic manager and connects to it
+'''
+
+# pylint: disable=import-error, wrong-import-position, no-member
+
 import os
 import logging
+import random
+import datetime
+
+import Ice
+import IceStorm
 
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
 
-try:
-    from timedAction import TimedAction
-except ImportError:
-    from iceflix.timedAction import TimedAction
 
 class ConnectionCheckerServant(IceFlix.Announcement):
+    '''
+        Receives announces from all IceFlix services and
+        checks whenever no announce from a valid main has been received for 10 seconds and
+        disconnects it
+    '''
+
     def __init__(self, conn_ref) -> None:
         super().__init__()
-        self.__timer = TimedAction(12000, self._timedout)
-        self.__timer.start()
         self._conn_ref = conn_ref
+        self.mains = {}
 
-    def announce(self, service: object, serviceId: str, current=None):
-        main = IceFlix.MainPrx.checkedCast(service)
+    def get_main(self):
+        '''
+            Get a random unexpired and reachable main
+        '''
+        if not self.mains:
+            return None
+        main = random.choice(list(self.mains))
+        expire_date = self.mains[main]
+        delta = datetime.datetime.now() - expire_date
+        refused = False
+        try:
+            main.ice_ping()
+        except Ice.ConnectionRefusedException:
+            refused = True
+        if delta > datetime.timedelta(seconds=12) or refused:
+            self.mains.pop(main)
+            return self.get_main()
+        return main
+
+    def announce(self, service: object, serviceId: str, _=None):
+        '''
+            Announce callback for IceFlix.Announcement
+        '''
+        try:
+            main = IceFlix.MainPrx.checkedCast(service)
+        except:
+            return None
         if main is None:
             return logging.info('Ignored announce from %s', serviceId)
-        self.__timer.reset()
+        self.mains[main] = datetime.datetime.now()
         self._conn_ref.main = main
-        logging.info('Using main %s', main)
+        return logging.info('Saved main %s', main)
 
     def _timedout(self):
         if self._conn_ref.main is None:
@@ -36,6 +71,9 @@ class ConnectionCheckerServant(IceFlix.Announcement):
         self._conn_ref.main = None
 
 class ConnectionCheckerApp(Ice.Application):
+    '''
+        Service for subscribing to a specific topic_manager and get all the announces
+    '''
     def __init__(self, comm, conn_ref):
         super().__init__()
         self.comm = comm
@@ -57,6 +95,9 @@ class ConnectionCheckerApp(Ice.Application):
         return 0
 
     def subscribe_to_proxy(self, topic_manager_str_prx: str):
+        '''
+            Subscribes to topic manager at topic_manager_str_prx
+        '''
         topic_manager = IceStorm.TopicManagerPrx.checkedCast(
             self.comm.stringToProxy(topic_manager_str_prx),
         )
@@ -86,6 +127,9 @@ class ConnectionCheckerApp(Ice.Application):
             logging.debug('Unsubscribed from %s', self._topic)
 
     def disconnect(self):
+        '''
+            Disconnects from current topic manager
+        '''
         self._unsubscribe()
         self.servant._conn_ref.main = None
         logging.info('Connection checker disconnected')

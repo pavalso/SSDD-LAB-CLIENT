@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # TODO: Remove the services you don't need
-iceflix-main --Ice.Config=configs/main.config &
-iceflix-catalog --Ice.Config=configs/catalog.config &
-iceflix-authenticator --Ice.Config=configs/authenticator.config &
-iceflix-streamprovider --Ice.Config=configs/fileservice.config
+python iceflix/main.py --Ice.Config=configs/main.config &
+python iceflix/catalog.py --Ice.Config=configs/catalog.config &
+python iceflix/authenticator.py --Ice.Config=configs/authenticator.config &
+python iceflix/file_service.py --Ice.Config=configs/fileservice.config

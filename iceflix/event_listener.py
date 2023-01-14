@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import Ice
-import IceStorm
-import os
+'''
+    Allows a client to connect to any topic from IceFlix and listen to all its events
+'''
 
-Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
-import IceFlix
+# pylint: disable=import-error, wrong-import-position, no-member, invalid-name
 
 from threading import Lock
 from enum import Enum
 from datetime import datetime
 
+import os
+import Ice
+import IceStorm
+
+Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
+import IceFlix
+
 
 class AvailableTopic(str, Enum):
+    '''
+        Allowed topics
+    '''
     Announcements = 'Announcements'
     UserUpdates = 'UserUpdates'
     CatalogUpdates = 'CatalogUpdates'
@@ -23,6 +32,9 @@ class AvailableTopic(str, Enum):
         return self.name
 
 class Event:
+    '''
+        Class used to store and event
+    '''
     timestamp: str
     interface: str
     event: str
@@ -40,57 +52,93 @@ class Event:
 
     @staticmethod
     def log_event(interface: AvailableTopic):
+        '''
+            Wrapper for logging a event from a topic manager
+        '''
         def decorator(func):
             def wrapper(*args, **kwargs):
                 current = args[-1]
-                serviceId = args[-2]
-                event_log = Event(current, serviceId, interface.value)
-                func(*args, event_log=event_log, **kwargs)
-                print(str(event_log))
+                _id = args[-2]
+                event = Event(current, _id, interface.value)
+                func(*args, event=event, **kwargs)
+                print(str(event))
             return wrapper
         return decorator
 
 class EventListener(
-    IceFlix.Announcement, IceFlix.UserUpdate, 
+    IceFlix.Announcement, IceFlix.UserUpdate,
     IceFlix.CatalogUpdate, IceFlix.FileAvailabilityAnnounce):
+    '''
+        Listens to any event from any IceFlix topic
+    '''
     @Event.log_event(AvailableTopic.Announcements)
-    def announce(self, service: object, serviceId: str, current=None, event_log=None):
+    def announce(self, service: object, _id: str, _=None, event=None):
+        '''
+            Logs announce event
+        '''
         service_type = service.ice_id()
-        event_log.msg = f'announce self as {service_type}'
+        event.msg = f'announce self as {service_type}'
 
     @Event.log_event(AvailableTopic.UserUpdates)
-    def newToken(self, user: str, token: str, serviceId: str, current=None, event_log=None):
-       event_log.msg = f'create token {token} for {user}'
+    def newToken(self, user: str, token: str, _id: str, _=None, event=None):
+        '''
+            Logs newToken event
+        '''
+        event.msg = f'create token {token} for {user}'
 
     @Event.log_event(AvailableTopic.UserUpdates)
-    def revokeToken(self, token: str, serviceId: str, current=None, event_log=None):
-        event_log.msg = f'revoke token {token}'
+    def revokeToken(self, token: str, _id: str, _=None, event=None):
+        '''
+            Logs revokeToken event
+        '''
+        event.msg = f'revoke token {token}'
 
     @Event.log_event(AvailableTopic.UserUpdates)
-    def newUser(self, user: str, passwordHash: str, serviceId: str, current=None, event_log=None):
-        event_log.msg = f'create user {user} with password hash {passwordHash}'
+    def newUser(self, user: str, passwordHash: str, _id: str, _=None, event=None):
+        '''
+            Logs newUser event
+        '''
+        event.msg = f'create user {user} with password hash {passwordHash}'
 
     @Event.log_event(AvailableTopic.UserUpdates)
-    def removeUser(self, user: str, serviceId: str, current=None, event_log=None):
-        event_log.msg = f'remove user {user}'
+    def removeUser(self, user: str, _id: str, _=None, event=None):
+        '''
+            Logs removeUser event
+        '''
+        event.msg = f'remove user {user}'
 
     @Event.log_event(AvailableTopic.CatalogUpdates)
-    def renameTile(self, mediaId: str, newName: str, serviceId: str, current=None, event_log=None):
-        event_log.msg = f'rename tile {mediaId} to {newName}'
+    def renameTile(self, mediaId: str, newName: str, _id: str, _=None, event=None):
+        '''
+            Logs renameTile event
+        '''
+        event.msg = f'rename tile {mediaId} to {newName}'
 
     @Event.log_event(AvailableTopic.CatalogUpdates)
-    def addTags(self, mediaId: str, user: str, tags: list[str], serviceId: str, current=None, event_log=None):
-        event_log.msg = f'add tags {tags} to the media {mediaId} for the user {user}'
+    def addTags(self, mediaId: str, user: str, tags: list[str], _id: str, _=None, event=None):
+        '''
+            Logs addTags event
+        '''
+        event.msg = f'add tags {tags} to the media {mediaId} for the user {user}'
 
     @Event.log_event(AvailableTopic.CatalogUpdates)
-    def removeTags(self, mediaId: str, user: str, tags: list[str], serviceId: str, current=None, event_log=None):
-        event_log.msg = f'remove tags {tags} from the media {mediaId} of the user {user}'
+    def removeTags(self, mediaId: str, user: str, tags: list[str], _id: str, _=None, event=None):
+        '''
+            Logs removeTags event
+        '''
+        event.msg = f'remove tags {tags} from the media {mediaId} of the user {user}'
 
     @Event.log_event(AvailableTopic.FileAvailabilityAnnounce)
-    def announceFiles(self, mediaIds: list[str], serviceId: str, current=None, event_log=None):
-        event_log.msg = f'announce {mediaIds}'
+    def announceFiles(self, mediaIds: list[str], _id: str, _=None, event=None):
+        '''
+            Logs announceFiles event
+        '''
+        event.msg = f'announce {mediaIds}'
 
 class EventListenerApp(Ice.Application):
+    '''
+        Initialize a new Event listener
+    '''
     def __init__(self, topic_manager_prx):
         super().__init__()
         self.comm = Ice.initialize()
@@ -123,6 +171,9 @@ class EventListenerApp(Ice.Application):
         self.comm.destroy()
 
     def subscribe(self, available_topic: AvailableTopic):
+        '''
+            Allows the servant to receive events for available_topic
+        '''
         available_topic = str(available_topic)
         if self.topics[available_topic] is not None:
             return
@@ -146,6 +197,9 @@ class EventListenerApp(Ice.Application):
         self.topics[available_topic] = topic
 
     def unsubscribe(self, available_topic: AvailableTopic):
+        '''
+            Stops the servant from receiving events for available_topic
+        '''
         available_topic = str(available_topic)
         topic = self.topics[available_topic]
         if topic is None:
@@ -154,17 +208,15 @@ class EventListenerApp(Ice.Application):
         self.topics[available_topic] = None
 
     def waitForShutdown(self):
+        '''
+            Wait until the event listener stops
+        '''
         self.__lock.acquire()
 
     def shutdown(self):
+        '''
+            Stops the event listener and unsubscribe from all topics
+        '''
         for available_topic in self.topics:
             self.unsubscribe(available_topic)
         self.__lock.release()
-
-if __name__ == '__main__':
-    with EventListenerApp('IceStorm/TopicManager -t:tcp -h localhost -p 10000') as app:
-        app.subscribe(AvailableTopic.Announcements)
-        app.subscribe(AvailableTopic.CatalogUpdates)
-        app.subscribe(AvailableTopic.FileAvailabilityAnnounce)
-        app.subscribe(AvailableTopic.UserUpdates)
-        input()

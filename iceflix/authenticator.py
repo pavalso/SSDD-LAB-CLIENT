@@ -7,8 +7,16 @@ import secrets
 import Ice
 import IceStorm
 
-import IceFlix
 
+try:
+    import IceFlix
+
+except ImportError:
+    import os
+    import Ice
+
+    Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
+import IceFlix
 from threading import Thread
 
 authenticator = None
