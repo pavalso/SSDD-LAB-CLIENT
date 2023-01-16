@@ -15,7 +15,7 @@ except ImportError:
     import os
     import Ice
 
-    Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
+    Ice.loadSlice(os.path.join(os.path.dirname(__file__), "../iceflix/iceflix.ice"))
 import IceFlix
 from threading import Thread
 
