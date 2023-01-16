@@ -287,6 +287,7 @@ class Commands:
             Connects to the authentication services and authenticate the user
         '''
         retries = conn.communicator.getProperties().getPropertyAsIntWithDefault('LoginRetries', MAX_TRIES)
+        retries = max(1, retries)
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
         password_hash = sha256(password.encode('utf-8')).hexdigest()
