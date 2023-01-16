@@ -2,7 +2,7 @@
 venv
 __pycache__
 build
-services
+aux_services
 IceFlix_Template.egg-info
 
 .coverage
