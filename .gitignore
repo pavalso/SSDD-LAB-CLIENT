@@ -12,3 +12,4 @@ IceFlix_Template.egg-info
 *~
 *.pyc
 .python-version
+!.coveragerc
