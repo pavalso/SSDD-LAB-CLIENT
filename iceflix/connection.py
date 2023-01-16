@@ -54,10 +54,15 @@ class ConnectionCheckerServant(IceFlix.Announcement):
         '''
             Announce callback for IceFlix.Announcement
         '''
-        try:
-            main = IceFlix.MainPrx.checkedCast(service)
-        except:
-            return None
+        if service is None:
+            return logging.debug('Received service None from %s', serviceId)
+        if isinstance(service, str):
+            try:
+                main = IceFlix.MainPrx.checkedCast(service)
+            except Exception as exception:
+                return logging.debug('Exception checking proxy %s: %s', service, exception)
+        elif isinstance(service, IceFlix.Main):
+            main = service
         if main is None:
             return logging.info('Ignored announce from %s', serviceId)
         self.mains[main] = datetime.datetime.now()
