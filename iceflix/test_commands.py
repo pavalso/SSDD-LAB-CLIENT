@@ -1,5 +1,5 @@
+import test_objects as tests
 import iceflix.commands
-import iceflix.test_objects
 
 import os
 
@@ -13,9 +13,9 @@ import IceFlix
 
 class TestCli(unittest.TestCase):
     def setUp(self) -> None:
-        self.main = iceflix.test_objects.Main()
-        self.main.authenticator = iceflix.test_objects.Authenticator()
-        self.main.catalog = iceflix.test_objects.Catalog()
+        self.main = tests.Main()
+        self.main.authenticator = tests.Authenticator()
+        self.main.catalog = tests.Catalog()
         self.cmd = iceflix.commands.CliHandler()
         self.cmd.active_conn._conn_check.servant.announce(self.main, 'test')
         self.cmd.active_conn._conn_check.servant.mains[self.main] = datetime.datetime(9999, 12, 30)
@@ -38,7 +38,13 @@ class TestCli(unittest.TestCase):
         self.assertIsNone(self.cmd.session.token)
         self.assertFalse(self.cmd.session.is_admin)
         self.cmd.read_input = lambda *_, **__: 'y'
-        iceflix.commands.getpass = lambda *_, **__: 'a_password'
+        iceflix.commands.getpass = lambda *_, **__: 'unauthorized'
+        self.cmd.do_logout('')
+        self.assertIsNone(self.cmd.session.token)
+        iceflix.commands.getpass = lambda *_, **__: 'temp_unavailable'
+        with self.assertRaises(IceFlix.TemporaryUnavailable):
+            self.cmd.do_logout('')
+        iceflix.commands.getpass = lambda *_, **__: 'a_valid_password'
         self.cmd.do_logout('')
         self.assertFalse(self.cmd.session.is_anon)
         self.assertIsNotNone(self.cmd.session.token)
@@ -69,6 +75,20 @@ class TestCli(unittest.TestCase):
         self.assertFalse(self.cmd.session.cached_titles)
         self.cmd.do_catalog('show')
         self.cmd.do_catalog('use title_1')
+
+    def test_selected(self):
+        pm = iceflix.commands.PartiaMedia('tile_1')
+        self.cmd.do_selected('rename new_tile_name')
+        self.cmd.session.refresh(self.cmd.active_conn)
+        self.cmd.session.selected_title = pm
+        self.cmd.do_selected('tags')
+        self.cmd.do_selected('tags add tag_5 tag_6')
+        self.cmd.do_selected('tags remove tag_5')
+        pm = iceflix.commands.PartiaMedia(None)
+        self.cmd.session.selected_title = pm
+        with self.assertRaises(IceFlix.WrongMediaId):
+            self.cmd.do_selected('tags add tag_5 tag_6')
+            self.cmd.do_selected('tags remove tag_5')
 
     def test_admin(self):
         iceflix.commands.getpass = lambda *_, **__: 'not_the_password'

@@ -4,7 +4,7 @@ import os
 
 import Ice
 
-Ice.loadSlice(os.path.join(os.path.dirname(__file__), "../iceflix.ice"))
+Ice.loadSlice(os.path.join(os.path.dirname(__file__), "../iceflix/iceflix.ice"))
 import IceFlix
 
 MEDIA_1 = IceFlix.Media(
@@ -78,6 +78,10 @@ class Catalog(IceFlix.MediaCatalog):
 
 class Authenticator(IceFlix.Authenticator):
     def refreshAuthorization(self, user, passwordHash, current=None):
+        if iceflix.commands.sha256(b'unauthorized').hexdigest() == passwordHash:
+            raise IceFlix.Unauthorized
+        if iceflix.commands.sha256(b'temp_unavailable').hexdigest() == passwordHash:
+            raise IceFlix.TemporaryUnavailable
         return 'SECRET_TOKEN'
 
     def isAuthorized(userToken):
