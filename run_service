@@ -1,7 +1,1 @@
 #!/usr/bin/env bash
-
-# TODO: Remove the services you don't need
-python services/main.py --Ice.Config=configs/main.config &
-python services/catalog.py --Ice.Config=configs/catalog.config &
-python services/authenticator.py --Ice.Config=configs/authenticator.config &
-python services/file_service.py --Ice.Config=configs/fileservice.config
