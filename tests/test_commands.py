@@ -1,4 +1,4 @@
-from tests import Main, Authenticator, Catalog
+from tests import Main, Authenticator, Catalog, FileService
 import iceflix.commands
 
 import os
@@ -16,6 +16,7 @@ class TestCli(unittest.TestCase):
         self.main = Main()
         self.main.authenticator = Authenticator()
         self.main.catalog = Catalog()
+        self.main.fileService = FileService()
         self.cmd = iceflix.commands.CliHandler()
         self.cmd.active_conn._conn_check.servant.announce(self.main, 'test')
         self.cmd.active_conn._conn_check.servant.mains[self.main] = datetime.datetime(9999, 12, 30)
@@ -30,8 +31,7 @@ class TestCli(unittest.TestCase):
         self.cmd.do_disconnect('')
         with self.assertRaises(iceflix.commands.NoMainError):
             self.cmd.do_catalog('get name a_tile')
-#pytest --cov iceflix
-#pip install pytest-cov
+
     def test_login(self):
         self.assertIsNotNone(self.cmd.active_conn.main)
         self.cmd.read_input = lambda *_, **__: 'n'
@@ -104,6 +104,17 @@ class TestCli(unittest.TestCase):
         self.assertTrue(self.cmd.session.is_admin)
         self.assertFalse(self.cmd.do_exit(''))
         self.assertFalse(self.cmd.session.is_admin)
+        self.cmd.do_admin('')
+        self.cmd.do_users('add usuario a_password_hash')
+        self.cmd.do_users('remove usuario')
+        self.cmd.do_upload('test_file.txt')
+        with self.assertRaises(RuntimeError):
+            self.cmd.do_analyzetopics('--all')
+        pm = iceflix.commands.PartiaMedia('tile_1')
+        self.cmd.session.selected_title = pm
+        self.cmd.session.is_anon = False
+        self.cmd.do_selected('download')
+        self.cmd.do_exit('')
         self.assertTrue(self.cmd.do_exit(''))
         # Test admin commands
 

@@ -25,3 +25,7 @@ It contains the following files and directories:
 - `setup.cfg` is a Python distribution configuration file for Setuptools.
   It needs to be modified in order to adeccuate to the package name and
   console handler functions.
+
+To test the repository package pytest-cov (pip install pytest-cov) should be installed, 
+in order to get the actual coverage "pytest --cov-config .coveragerc --cov iceflix" should be called 
+in an environment where this module is installed (pip install .)

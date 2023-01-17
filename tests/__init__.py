@@ -1,15 +1,45 @@
 import iceflix.commands
 
 import os
+import random
 
 import Ice
 
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "../iceflix/iceflix.ice"))
 import IceFlix
 
+
+class FileHandler(IceFlix.FileHandler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.buffer = random.randbytes(4096)
+
+    def receive(self, size, current=None):
+        raw, self.buffer = self.buffer[:size], self.buffer[size:]
+        return raw
+    
+    def close(self, current=None):
+        pass
+
+class FileService(IceFlix.FileService):
+    def openFile(self, mediaId, userToken, current=None):
+        return FileHandler()
+
+    def uploadFile(self, uploader, adminToken, current=None):
+        while True:
+            buf = uploader.receive(1024)
+            if not buf:
+                break
+            print(buf)
+        uploader.close()
+        return 'tile_3'
+
+    def removeFile(self, mediaId, adminToken, current=None):
+        pass
+
 MEDIA_1 = IceFlix.Media(
     'tile_1',
-    None,
+    FileService(),
     IceFlix.MediaInfo(
         'valid_tile',
          ['tag_1', 'tag_2']
@@ -18,7 +48,7 @@ MEDIA_1 = IceFlix.Media(
 
 MEDIA_2 = IceFlix.Media(
     'tile_2',
-    None,
+    FileService(),
     IceFlix.MediaInfo(
         'valid_tile_2',
          ['tag_2', 'tag_3']
