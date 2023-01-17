@@ -1,3 +1,10 @@
 #!/usr/bin/env bash
 
+#if [ -z docker ]; then
+#    iceflix --Ice.Config=configs/client.config
+#    exit 1
+#else
+#    sudo docker run -it --network=host iceflix:client || sudo docker build -t iceflix:client .
+#fi
+
 iceflix --Ice.Config=configs/client.config

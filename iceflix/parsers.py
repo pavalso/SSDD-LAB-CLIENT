@@ -5,6 +5,12 @@
 import sys
 import cmd2
 
+try:
+    from event_listener import AvailableTopic
+except ImportError:
+    from iceflix.event_listener import AvailableTopic
+
+
 reconnect_parser = cmd2.Cmd2ArgumentParser()
 reconnect_parser.add_argument('-p', '--proxy', type=str, default=None)
 
@@ -61,3 +67,8 @@ users_remove.add_argument('user', type=str)
 
 upload_parser = cmd2.Cmd2ArgumentParser()
 upload_parser.add_argument('file', type=str)
+
+analyzer_parser = cmd2.Cmd2ArgumentParser()
+analyzer_parser.add_argument('-topics', nargs='+', choices=list(AvailableTopic))
+analyzer_parser.add_argument('-ignore', nargs='+', choices=list(AvailableTopic), default=[])
+analyzer_parser.add_argument('--all', action='store_true')

@@ -1,0 +1,2 @@
+[run]
+omit = */iceflix/cli.py, */iceflix/client.py, */iceflix/__init__.py

@@ -2,10 +2,11 @@
     Cmd handling
 '''
 
-# pylint: disable=import-error, wrong-import-position, no-member, ungrouped-imports
+# pylint: disable=import-error, wrong-import-position, no-member
 
 from enum import Enum
-from threading import Timer, Thread
+from threading import Event, current_thread, main_thread, Thread
+
 from dataclasses import dataclass, field
 from getpass import getpass
 from hashlib import sha256
@@ -13,22 +14,25 @@ from time import sleep, perf_counter_ns
 
 try:
     from file_uploader import FileUploaderApp
+    from connection import ConnectionCheckerApp
+    import event_listener
+    import parsers
 except ImportError:
     from iceflix.file_uploader import FileUploaderApp
-
+    from iceflix.connection import ConnectionCheckerApp
+    from iceflix import event_listener
+    from iceflix import parsers
 
 import os
 import sys
+import logging
 
 import Ice
 import cmd2
 
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
 import IceFlix
-try:
-    import parsers
-except ImportError:
-    from iceflix import parsers
+
 
 MAX_TRIES = 3
 
@@ -60,47 +64,65 @@ class ActiveConnection:
     _main = None
     proxy : str = None
 
-    reachable : bool = False
+    reachable = Event()
     remote : str = '-'
+    _conn_check: ConnectionCheckerApp = None
 
     @property
     def main(self):
         '''
-            Returns the main server proxy
+            Returns a main server proxy
         '''
+        self.main = self._conn_check.servant.get_main()
+        logging.debug('Selected main %s', self._main)
         return self._main
 
     @main.setter
     def main(self, new):
+        if self._main == new:
+            return None
         self._main = new
-        self.reachable = new is not None
-        if self.reachable:
-            self.remote = new.ice_getConnection().getEndpoint().getInfo().host
+        if new is not None:
+            self.reachable.set()
         else:
-            self.remote = '-'
+            self.reachable.clear()
+        if current_thread() == main_thread():
+            return self.__set_prompt()
+        return self.__async_set_prompt()
 
-    def __post_init__(self) -> None:
-        self.communicator = Ice.initialize(sys.argv)
-        Thread(target=self._periodic_check, daemon=True).start()
+    def _check_conn(self):
+        while not sleep(10):
+            main = self._conn_check.servant.get_main()
+            self.main = main
 
-    def _periodic_check(self):
-        while True:
-            _timer = Timer(interval=5, function=self._conn_check)
-            _timer.start()
-            _timer.finished.wait()
+    def __set_prompt(self):
+        self.terminal.prompt = self.terminal.get_prompt()
 
-    def _conn_check(self):
-        try:
-            if self.main:
-                self.main.ice_ping()
-                self.reachable = True
-            else:
-                self.reachable = False
-        except (Ice.ConnectFailedException, Ice.ConnectionRefusedException, Ice.ObjectNotExistException):
-            self.reachable = False
+    def __async_set_prompt(self):
         if self.terminal.terminal_lock.acquire(blocking=False):
             self.terminal.async_update_prompt(self.terminal.get_prompt())
             self.terminal.terminal_lock.release()
+
+    def __post_init__(self) -> None:
+        self.communicator = Ice.initialize(sys.argv)
+        self._conn_check = ConnectionCheckerApp(self.communicator, self)
+        self._conn_check.main()
+        Thread(target=self._check_conn, daemon=True).start()
+
+    def connect_topic_manager(self, topic_proxy: str) -> None:
+        '''
+            Connects to topic manager at topic_proxy
+        '''
+        self.main = None
+        self._conn_check.subscribe_to_proxy(topic_proxy)
+        self.remote = self._conn_check._topic.ice_getConnection().getEndpoint().getInfo().host
+
+    def disconnect_topic_manager(self) -> None:
+        '''
+            Disconnects from the connected topic manager
+        '''
+        self.remote = '-'
+        self._conn_check.disconnect()
 
     @staticmethod
     def needs_main(func):
@@ -108,7 +130,7 @@ class ActiveConnection:
             Only runs the command if the main server is reachable
         '''
         def wrapper(self, *args, **kwargs):
-            if not self.reachable:
+            if not self.reachable.is_set() or not self.main:
                 raise NoMainError
             return func(self, *args, **kwargs)
         return wrapper
@@ -118,21 +140,30 @@ class ActiveConnection:
         '''
             Retrieves an authenticator from the main server
         '''
-        return self.main.getAuthenticator()
+        logging.info('Obtaining an authenticator from main server...')
+        authenticator = self.main.getAuthenticator()
+        logging.debug('Got authenticator proxy %s', authenticator)
+        return authenticator
 
     @needs_main
     def get_catalog(self):
         '''
             Retrieves a catalog from the main server
         '''
-        return self.main.getCatalog()
+        logging.info('Obtaining a catalog from main server...')
+        catalog = self.main.getCatalog()
+        logging.debug('Got catalog proxy %s', catalog)
+        return catalog
 
     @needs_main
     def get_file_service(self):
         '''
             Retrieves a file service from the main server
         '''
-        return self.main.getFileService()
+        logging.info('Obtaining a file service from main server...')
+        file_service = self.main.getFileService()
+        logging.debug('Got file service proxy %s', file_service)
+        return file_service
 
 @dataclass
 class PartiaMedia:
@@ -153,13 +184,16 @@ class PartiaMedia:
 
         session = conn.terminal.session
         if session.is_anon:
+            logging.warning("Can't fetch media if the user is anon")
             return None
 
-        media = catalog.getTile(self.id, conn.terminal.session.token)
+        logging.info('Fetching tile %s from the catalog', self.id)
+        media = catalog.getTile(self.id, session.token)
         if media.info:
             self.name = media.info.name
             self.tags = media.info.tags
         self.media = media
+        logging.debug('Got tile: %s', self)
         return self.media
 
     def __str__(self) -> str:
@@ -194,6 +228,8 @@ class Session:
         '''
         self.admin_pass = admin_password
         self.is_admin = True
+        logging.info('%s is now an admin', self.user)
+        logging.debug('Using admin token %s', self.admin_pass)
 
     def make_user(self):
         '''
@@ -201,15 +237,19 @@ class Session:
         '''
         self.admin_pass = None
         self.is_admin = False
+        logging.info('%s is now an user', self.user)
 
     def refresh(self, conn : ActiveConnection):
         '''
             Tries to obtain a new token from the authentication services
         '''
         auth = conn.get_authenticator()
+        logging.info('Trying to get a token from the authentication services...')
         token = auth.refreshAuthorization(self.user, self.pass_hash)
         self.token = token
         self.is_anon = self.token is None
+        logging.debug("This session is using token: '%s'",
+            self.token if not self.is_anon else 'No token')
         return self
 
 class Commands:
@@ -226,20 +266,18 @@ class Commands:
             return conn.terminal.perror("Proxy can't be empty")
 
         try:
-            base = conn.communicator.stringToProxy(proxy)
-            main = IceFlix.MainPrx.checkedCast(base)
+            conn.connect_topic_manager(proxy)
+            if not conn.reachable.wait(timeout=12):
+                return conn.terminal.perror('No main service available')
+            conn.proxy = proxy
+            conn.terminal.poutput('Connection stablished')
+            return conn
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
         except Ice.NoEndpointException:
             conn.terminal.perror('Proxy needs an endpoint')
         except (Ice.ProxyParseException, Ice.EndpointParseException) as parse_exception:
             conn.terminal.perror(parse_exception.str)
-        else:
-            conn.main = main
-            conn.proxy = proxy
-            conn.terminal.prompt = conn.terminal.get_prompt()
-            conn.terminal.poutput('Connection stablished')
-            return conn
         return None
 
     @staticmethod
@@ -249,6 +287,7 @@ class Commands:
             Connects to the authentication services and authenticate the user
         '''
         retries = conn.communicator.getProperties().getPropertyAsIntWithDefault('LoginRetries', MAX_TRIES)
+        retries = max(1, retries)
         username = conn.terminal.read_input('Username: ')
         password = getpass('Password: ')
         password_hash = sha256(password.encode('utf-8')).hexdigest()
@@ -257,6 +296,8 @@ class Commands:
             for i in range(1, retries + 1):
                 try:
                     session.refresh(conn)
+                    conn.terminal.session = session
+                    return
                 except IceFlix.TemporaryUnavailable as temporary_error:
                     if not i == retries:
                         conn.terminal.pwarning(
@@ -266,8 +307,6 @@ class Commands:
                         raise IceFlix.TemporaryUnavailable from temporary_error
         except IceFlix.Unauthorized:
             conn.terminal.perror('Wrong username/password combination')
-        else:
-            conn.terminal.session = session
 
     @staticmethod
     def get_catalog_name(conn : ActiveConnection, name : str, exact : bool):
@@ -276,17 +315,18 @@ class Commands:
         '''
         catalog = conn.get_catalog()
 
+        logging.info('Fetching tiles %s %s', 'EXACT' if exact else 'NOT EXACT', name)
         titles = catalog.getTilesByName(name, exact)
+        logging.info('Got %d tiles', len(titles))
         if not titles:
             if exact:
                 conn.terminal.perror(f'None of the media is titled: {name}')
             else:
                 conn.terminal.perror(f'None of the media contains: {name}')
             return
-        pmedia = PartiaMedia(titles[0], name=name)
-        buffer = {pmedia.id: pmedia}
-        Commands.save_pmedia(conn, buffer)
-        Commands.show_titles(conn, buffer)
+        pmedia = {_id: PartiaMedia(_id, name=name) for _id in titles}
+        Commands.save_pmedia(conn, pmedia)
+        Commands.show_titles(conn, pmedia)
 
     @staticmethod
     def get_catalog_tags(conn : ActiveConnection, tags : list[str], include_all : bool):
@@ -295,7 +335,9 @@ class Commands:
         '''
         catalog = conn.get_catalog()
 
+        logging.info('Fetching %s %s', 'INCLUDE ALL' if include_all else 'NOT INCLUDE ALL', tags)
         titles = catalog.getTilesByTags(tags, include_all, conn.terminal.session.token)
+        logging.info('Got %d tiles', len(titles))
         if not titles:
             title_tags = ', '.join(tags)
             if include_all:
@@ -330,6 +372,7 @@ class Commands:
             updated.name = cached.name if updated.name is None else updated.name
             updated.tags = cached.tags if updated.tags is None else updated.tags
 
+        logging.debug('Saved tiles: %s', media)
         conn.terminal.session.cached_titles.update(media)
 
     @staticmethod
@@ -357,6 +400,7 @@ class Commands:
         title.tags.extend(tags)
         title.tags = list(set(title.tags))
         catalog.addTags(title.id, tags, conn.terminal.session.token)
+        logging.debug('Added tags to %s: %s', title.id, tags)
 
     @staticmethod
     def remove_tags(conn : ActiveConnection, tags : list[str]):
@@ -365,9 +409,11 @@ class Commands:
         '''
         title = conn.terminal.session.selected_title
         catalog = conn.get_catalog()
-        tags = list(set(title.tags).difference(tags))
-        title.tags = None if not tags else tags
+        if title.tags is not None:
+            new_tags = list(set(title.tags).difference(tags))
+            title.tags = None if not new_tags else new_tags
         catalog.removeTags(title.id, tags, conn.terminal.session.token)
+        logging.debug('Removed tags from %s: %s', title.id, tags)
 
     @staticmethod
     def download(conn : ActiveConnection):
@@ -384,6 +430,8 @@ class Commands:
             conn.terminal.perror("The title selected couldn't be downloaded")
             return
 
+        logging.debug('Downloading from: %s', media.provider)
+
         session = conn.terminal.session
         handler = title.media.provider.openFile(title.id, session.token)
         with conn.terminal.terminal_lock:
@@ -396,17 +444,21 @@ class Commands:
                             raw = handler.receive(2048, session.token)
                             if not raw:
                                 break
+                            logging.debug('%s', raw)
                             file.write(raw)
                         except IceFlix.Unauthorized:
+                            logging.info('User token got rejected while downloading, refreshing...')
                             session.refresh(conn)
                 except IceFlix.Unauthorized as unauthorized_error:
+                    logging.info("Couldn't get a new valid user token, reverting download")
                     os.remove(title.name)
                     raise IceFlix.Unauthorized from unauthorized_error
                 else:
                     time_end = perf_counter_ns()
-                    final_time = time_end - time_initial
+                    final_time = (time_end - time_initial) / 10**9
+                    logging.info('Download finished in %.2f seconds', final_time)
                     conn.terminal.poutput(
-                        f"Finished downloading: '{title.name}' in {final_time / 10**9:.2f} seconds"
+                        f"Finished downloading: '{title.name}' in {final_time:.2f} seconds"
                         )
                     handler.close(session.token)
 
@@ -436,6 +488,7 @@ class Commands:
         auth = conn.get_authenticator()
         password_hash = sha256(password.encode('utf-8')).hexdigest()
         auth.addUser(user, password_hash, conn.terminal.session.admin_pass)
+        logging.debug('User %s with password hash %s created', user, password_hash)
         conn.terminal.poutput(f'Added user {user}')
 
     @staticmethod
@@ -445,6 +498,7 @@ class Commands:
         '''
         auth = conn.get_authenticator()
         auth.removeUser(user, conn.terminal.session.admin_pass)
+        logging.debug('User %s removed', user)
         conn.terminal.poutput(f'Removed user {user}')
 
     @staticmethod
@@ -456,6 +510,7 @@ class Commands:
         catalog = conn.get_catalog()
         catalog.renameTile(title.id, name, conn.terminal.session.admin_pass)
         title.name = name
+        logging.debug('Title %s renamed to %s', title.id, name)
         conn.terminal.poutput(f'Title renamed to {name}')
 
     @staticmethod
@@ -473,9 +528,12 @@ class Commands:
             conn.terminal.perror("The title selected couldn't be deleted, no provider associated")
             return
 
+        logging.info('Removing tile %s', title.id)
+
         media.provider.removeFile(title.id, conn.terminal.session.admin_pass)
         conn.terminal.session.cached_titles.pop(title.id)
         conn.terminal.session.selected_title = None
+        logging.debug('Removed tile %s from %s',  title.id, media.provider)
         conn.terminal.poutput(f'Removed {title.name}')
 
     @staticmethod
@@ -506,6 +564,7 @@ class CliHandler(cmd2.Cmd):
         self.active_conn = ActiveConnection(self)
         self.session = Session()
         shortcuts = dict(cmd2.DEFAULT_SHORTCUTS)
+
         shortcuts.update({'sudo': 'admin'})
         super().__init__(shortcuts=shortcuts)
 
@@ -579,7 +638,7 @@ use the command 'admin' to obtain them''')
         '''
             Closes the connection to the main service, doesn't end the program execution
         '''
-        self.active_conn.main = None
+        self.active_conn.disconnect_topic_manager()
         self.session.make_user()
 
     @cmd2.with_category("Utility")
@@ -783,6 +842,11 @@ use the command 'admin' to obtain them''')
         '''
             Destroys the active communicator if it exists
         '''
+        if self.active_conn._conn_check is not None:
+            try:
+                self.active_conn.disconnect_topic_manager()
+            except Ice.ConnectionRefusedException:
+                pass
         if self.active_conn.communicator is not None:
             self.active_conn.communicator.destroy()
 
@@ -798,6 +862,32 @@ use the command 'admin' to obtain them''')
             return
         Commands.upload(self.active_conn, args.file)
 
+    @cmd2.with_argparser(parsers.analyzer_parser)
+    @cmd2.with_category("Utility")
+    @need_admin
+    def do_analyzetopics(self, args):
+        '''
+            Allows an administrator user to see what's happening at
+            any topic channel used by IceFlix
+        '''
+        topics = args.topics if args.topics is not None else []
+        if args.all:
+            topics = list(event_listener.AvailableTopic)
+        topics = list(set(topics).difference(args.ignore))
+        if not topics:
+            self.pwarning('[!] Empty topic list, showing help')
+            return self.do_help('analyzetopics')
+        stopics = ', '.join(topics) if topics else '-'
+        self.pfeedback(f"Listening events from '{self.active_conn.proxy}'")
+        self.poutput(f'Listening topics: {stopics}')
+        self.pwarning('\nctrl+c to stop\n')
+        self.poutput('-------------- Listening for events -------------')
+        with event_listener.EventListenerApp(self.active_conn.proxy) as listener:
+            for topic in topics:
+                listener.subscribe(topic)
+            listener.waitForShutdown()
+        return None
+
     def get_prompt(self):
         '''
             Generates the cmd prompt
@@ -809,7 +899,7 @@ use the command 'admin' to obtain them''')
         media = cmd2.ansi.style(media, fg=COLOR_SELECTED_TITLE)
         remote = self.active_conn.remote
         raw_text = f'{self.session.display_name}@{remote}:{media} '
-        if not self.active_conn.reachable:
+        if not self.active_conn.reachable.is_set():
             color = COLORS.DISCONNECTED
         elif self.session.is_admin:
             color = COLORS.ADMIN
@@ -849,22 +939,3 @@ use the command 'admin' to obtain them''')
 
     def perror(self, msg: str = '', *, end: str = '\n', apply_style: bool = True) -> None:
         return super().perror(msg, end=end, apply_style=apply_style)
-
-def show_logo():
-    '''Prints in screen the app logo'''
-    logo = r"""
- ██▓ ▄████▄  ▓█████   █████▒██▓     ██▓▒██   ██▒
-▓██▒▒██▀ ▀█  ▓█   ▀ ▓██   ▒▓██▒    ▓██▒▒▒ █ █ ▒░
-▒██▒▒▓█    ▄ ▒███   ▒████ ░▒██░    ▒██▒░░  █   ░
-░██░▒▓▓▄ ▄██▒▒▓█  ▄ ░▓█▒  ░▒██░    ░██░ ░ █ █ ▒
-░██░▒ ▓███▀ ░░▒████▒░▒█░   ░██████▒░██░▒██▒ ▒██▒
-░▓  ░ ░▒ ▒  ░░░ ▒░ ░ ▒ ░   ░ ▒░▓  ░░▓  ▒▒ ░ ░▓ ░
- ▒ ░  ░  ▒    ░ ░  ░ ░     ░ ░ ▒  ░ ▒ ░░░   ░▒ ░
- ▒ ░░           ░    ░ ░     ░ ░    ▒ ░ ░    ░
- ░  ░ ░         ░  ░           ░  ░ ░   ░    ░
-    ░
-"""
-    ascii_msg = cmd2.ansi.style(logo, fg=cmd2.ansi.RgbFg(175,200,255))
-    print(
-        ascii_msg
-    )
