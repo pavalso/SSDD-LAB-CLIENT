@@ -29,3 +29,9 @@ It contains the following files and directories:
 To test the repository package pytest-cov (pip install pytest-cov) should be installed, 
 in order to get the actual coverage "pytest --cov-config .coveragerc --cov iceflix" should be called 
 in an environment where this module is installed (pip install .)
+
+To create the docker container:
+  1. sudo docker build --tag {container_name}:{container_tag} .
+  2. sudo docker run -it {container_name}:{container_tag}
+
+*zeroc-ice wheel may freeze for 5 or more minutes when building 
