@@ -116,7 +116,6 @@ class TestCli(unittest.TestCase):
         self.cmd.do_selected('download')
         self.cmd.do_exit('')
         self.assertTrue(self.cmd.do_exit(''))
-        # Test admin commands
 
     def tearDown(self) -> None:
         self.cmd.shutdown()
