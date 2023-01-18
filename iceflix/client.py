@@ -5,6 +5,7 @@
 
 import sys
 import os
+
 import Ice
 import cmd2
 
@@ -42,10 +43,9 @@ def client_main():
 
     try:
         with cmd.terminal_lock:
-            prx = cmd.read_input('Connection proxy: ').replace('\"', '')
-            cmd.onecmd(f'reconnect -p "{prx}"')
-            if not cmd.active_conn.reachable.is_set():
-                sys.exit(1)
+            while not cmd.active_conn.reachable.is_set():
+                prx = cmd.read_input('Connection proxy: ').replace('\"', '')
+                cmd.onecmd(f'reconnect -p "{prx}"')
 
             if cmd.active_conn.main and cmd.onecmd('logout'):
                 return
