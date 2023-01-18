@@ -11,7 +11,7 @@ Ice.loadSlice(os.path.join(os.path.dirname(__file__), "../iceflix/iceflix.ice"))
 import IceFlix
 
 
-class TestCli(unittest.TestCase):
+class TestCliActive(unittest.TestCase):
     def setUp(self) -> None:
         self.main = Main()
         self.main.authenticator = Authenticator()
@@ -108,6 +108,7 @@ class TestCli(unittest.TestCase):
         self.cmd.do_users('add usuario a_password_hash')
         self.cmd.do_users('remove usuario')
         self.cmd.do_upload('test_file.txt')
+        self.cmd.do_admin('upload tests/test_file.txt')
         with self.assertRaises(RuntimeError):
             self.cmd.do_analyzetopics('--all')
         pm = iceflix.commands.PartiaMedia('tile_1')
@@ -116,6 +117,41 @@ class TestCli(unittest.TestCase):
         self.cmd.do_selected('download')
         self.cmd.do_exit('')
         self.assertTrue(self.cmd.do_exit(''))
+
+    def tearDown(self) -> None:
+        self.cmd.shutdown()
+
+class TestCliInactive(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cmd = iceflix.commands.CliHandler()
+
+    def test_reconnect(self):
+        self.cmd.do_reconnect('')
+        self.cmd.do_reconnect('-p "proxy"')
+        with self.assertRaises(Ice.ConnectionRefusedException):
+            self.cmd.do_reconnect('-p "proxy:tcp"')
+
+    def test_disconnect(self):
+        self.cmd.do_disconnect('')
+        with self.assertRaises(iceflix.commands.NoMainError):
+            self.cmd.do_catalog('get name a_tile')
+
+    def test_login(self):
+        self.cmd.read_input = lambda *_, **__: 'y'
+        iceflix.commands.getpass = lambda *_, **__: 'unauthorized'
+        with self.assertRaises(iceflix.commands.NoMainError):
+            self.cmd.do_logout('')
+
+    def test_catalog(self):
+        with self.assertRaises(iceflix.commands.NoMainError):
+            self.cmd.do_catalog('get name not_a_tile')
+            self.cmd.do_catalog('get tags tag_1')
+
+    def test_selected(self):
+        pm = iceflix.commands.PartiaMedia('tile_1')
+        self.cmd.session.selected_title = pm
+        self.cmd.do_selected('tags add tag_5 tag_6')
+        self.cmd.do_selected('tags remove tag_5')
 
     def tearDown(self) -> None:
         self.cmd.shutdown()
