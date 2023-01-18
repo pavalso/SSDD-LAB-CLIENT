@@ -20,4 +20,4 @@ jobs:
         pip install pytest-cov .
     - name: Test the code assert coverage >= 80
       run: |
-        pytest --cov-config tests/.coveragerc --cov iceflix
+        pytest --cov-config tests/.coveragerc --cov-fail-under 80 --cov iceflix
