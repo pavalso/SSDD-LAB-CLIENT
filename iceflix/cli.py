@@ -33,35 +33,3 @@ def client():
     logging.info("Starting IceFlix client...")
     client_main()
     return 0
-
-#import sys
-#
-#def main():
-#    """Handles the IceFlix client CLI command."""
-#    from iceflix.main import MainApp
-#    setup_logging()
-#    logging.info("Starting IceFlix main...")
-#    MainApp().main(sys.argv)
-#    return 0
-#
-#def authenticator():
-#    from iceflix.authenticator import AuthenticatorApp
-#    setup_logging()
-#    logging.info("Starting IceFlix authenticator...")
-#    AuthenticatorApp().main(sys.argv)
-#    return 0
-#
-#def catalog():
-#    from iceflix.catalog import CatalogApp
-#    setup_logging()
-#    logging.info("Starting IceFlix catalog...")
-#    CatalogApp().main(sys.argv)
-#    return 0
-#
-#def fileservice():
-#    from iceflix.file_service import FileServiceApp
-#    setup_logging()
-#    logging.info("Starting IceFlix FileService...")
-#    FileServiceApp().main(sys.argv)
-#    return 0
-#
