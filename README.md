@@ -38,7 +38,7 @@ The above functionality can be achieved with: `pytest --cov-config .coveragerc -
 This should allow you to execute the client in a docker environment
 
 To create the docker container:
-  1. sudo docker build --tag {container_name}:{container_tag} .
-  2. sudo docker run -it {container_name}:{container_tag}
+  1. `sudo docker build --tag {container_name}:{container_tag} .`
+  2. `sudo docker run -it {container_name}:{container_tag}`
 
 **zeroc-ice wheel may freeze for 5 or more minutes when building**
