@@ -28,6 +28,7 @@ import sys
 import logging
 
 import Ice
+import IceStorm
 import cmd2
 
 Ice.loadSlice(os.path.join(os.path.dirname(__file__), "iceflix.ice"))
@@ -61,8 +62,8 @@ class ActiveConnection:
     '''
     terminal : cmd2.Cmd
     communicator : Ice.CommunicatorI = None
+    topic_manager: object = None
     _main = None
-    proxy : str = None
 
     reachable = Event()
     remote : str = '-'
@@ -109,12 +110,12 @@ class ActiveConnection:
         self._conn_check.main()
         Thread(target=self._check_conn, daemon=True).start()
 
-    def connect_topic_manager(self, topic_proxy: str) -> None:
+    def connect_topic_manager(self, topic_manager) -> None:
         '''
             Connects to topic manager at topic_proxy
         '''
         self.main = None
-        self._conn_check.subscribe_to_proxy(topic_proxy)
+        self._conn_check.subscribe_to_topic_manager(topic_manager)
         self.remote = self._conn_check._topic.ice_getConnection().getEndpoint().getInfo().host
 
     def disconnect_topic_manager(self) -> None:
@@ -258,19 +259,25 @@ class Commands:
     '''
 
     @staticmethod
-    def stablish_connection_main(conn : ActiveConnection, proxy):
+    def stablish_connection_main(conn : ActiveConnection):
         '''
             Tries to reach a main proxy, if it reaches stablish the connection
         '''
-        if not proxy:
-            return conn.terminal.perror("Proxy can't be empty")
+        topic_manager = IceStorm.TopicManagerPrx.checkedCast(
+            conn.communicator.propertyToProxy("IceStorm.TopicManager")
+        )
+
+        if not topic_manager:
+            return conn.terminal.perror('IceStorm.TopicManager is invalid')
+
+        logging.debug('Connected to topic manager %s', topic_manager)
 
         try:
-            conn.connect_topic_manager(proxy)
+            conn.connect_topic_manager(topic_manager)
             if not conn.reachable.wait(timeout=12):
                 return conn.terminal.perror('No main service available')
-            conn.proxy = proxy
             conn.terminal.poutput('Connection stablished')
+            conn.topic_manager = topic_manager
             return conn
         except Ice.ObjectNotExistException as error:
             conn.terminal.perror(f'{error.id.name} is an invalid object')
@@ -566,7 +573,7 @@ class CliHandler(cmd2.Cmd):
         shortcuts = dict(cmd2.DEFAULT_SHORTCUTS)
 
         shortcuts.update({'sudo': 'admin'})
-        super().__init__(shortcuts=shortcuts)
+        super().__init__(shortcuts=shortcuts, allow_cli_args=False)
 
         self.debug = True
 
@@ -624,14 +631,12 @@ use the command 'admin' to obtain them''')
         '''
         return self.read_input(f'{prompt} [Yy/Nn]: ').lower() == "y"
 
-    @cmd2.with_argparser(parsers.reconnect_parser)
     @cmd2.with_category("Utility")
-    def do_reconnect(self, args):
+    def do_reconnect(self, _):
         '''
-            Reconnect to the main service, can be given a proxy
+            Reconnect to the topic manager service
         '''
-        prx = self.active_conn.proxy if args.proxy is None else args.proxy
-        Commands.stablish_connection_main(self.active_conn, prx)
+        Commands.stablish_connection_main(self.active_conn)
 
     @cmd2.with_category("Utility")
     def do_disconnect(self, _):
@@ -878,11 +883,11 @@ use the command 'admin' to obtain them''')
             self.pwarning('[!] Empty topic list, showing help')
             return self.do_help('analyzetopics')
         stopics = ', '.join(topics) if topics else '-'
-        self.pfeedback(f"Listening events from '{self.active_conn.proxy}'")
+        self.pfeedback(f"Listening events from '{self.active_conn.topic_manager}'")
         self.poutput(f'Listening topics: {stopics}')
         self.pwarning('\nctrl+c to stop\n')
         self.poutput('-------------- Listening for events -------------')
-        with event_listener.EventListenerApp(self.active_conn.proxy) as listener:
+        with event_listener.EventListenerApp(self.active_conn.topic_manager) as listener:
             for topic in topics:
                 listener.subscribe(topic)
             listener.waitForShutdown()

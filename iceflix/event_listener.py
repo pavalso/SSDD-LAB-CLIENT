@@ -139,13 +139,13 @@ class EventListenerApp(Ice.Application):
     '''
         Initialize a new Event listener
     '''
-    def __init__(self, topic_manager_prx):
+    def __init__(self, topic_manager):
         super().__init__()
         self.comm = Ice.initialize()
         self.servant = EventListener()
         self.proxy = None
         self.adapter = None
-        self.topic_manager_prx = topic_manager_prx
+        self.topic_manager = topic_manager
         self.__lock = Lock()
 
         self.topics = {str(topic): None for topic in AvailableTopic}
@@ -178,9 +178,7 @@ class EventListenerApp(Ice.Application):
         if self.topics[available_topic] is not None:
             return
 
-        topic_manager = IceStorm.TopicManagerPrx.checkedCast(
-            self.comm.stringToProxy(self.topic_manager_prx),
-        )
+        topic_manager = self.topic_manager
 
         if not topic_manager:
             raise RuntimeError("Invalid TopicManager proxy")

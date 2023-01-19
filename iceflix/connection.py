@@ -99,17 +99,10 @@ class ConnectionCheckerApp(Ice.Application):
 
         return 0
 
-    def subscribe_to_proxy(self, topic_manager_str_prx: str):
+    def subscribe_to_topic_manager(self, topic_manager):
         '''
             Subscribes to topic manager at topic_manager_str_prx
         '''
-        topic_manager = IceStorm.TopicManagerPrx.checkedCast(
-            self.comm.stringToProxy(topic_manager_str_prx),
-        )
-        logging.debug("Connected to topic manager '%s'", topic_manager)
-
-        if not topic_manager:
-            raise RuntimeError("Invalid TopicManager proxy")
 
         topic_name = "Announcements"
         try:
