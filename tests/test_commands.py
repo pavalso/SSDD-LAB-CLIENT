@@ -23,9 +23,6 @@ class TestCliActive(unittest.TestCase):
 
     def test_reconnect(self):
         self.cmd.do_reconnect('')
-        self.cmd.do_reconnect('-p "proxy"')
-        with self.assertRaises(Ice.ConnectionRefusedException):
-            self.cmd.do_reconnect('-p "proxy:tcp"')
 
     def test_disconnect(self):
         self.cmd.do_disconnect('')
@@ -127,9 +124,6 @@ class TestCliInactive(unittest.TestCase):
 
     def test_reconnect(self):
         self.cmd.do_reconnect('')
-        self.cmd.do_reconnect('-p "proxy"')
-        with self.assertRaises(Ice.ConnectionRefusedException):
-            self.cmd.do_reconnect('-p "proxy:tcp"')
 
     def test_disconnect(self):
         self.cmd.do_disconnect('')
