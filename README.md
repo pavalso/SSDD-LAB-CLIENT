@@ -26,12 +26,19 @@ It contains the following files and directories:
   It needs to be modified in order to adeccuate to the package name and
   console handler functions.
 
-To test the repository package pytest-cov (pip install pytest-cov) should be installed, 
-in order to get the actual coverage "pytest --cov-config .coveragerc --cov iceflix" should be called 
-in an environment where this module is installed (pip install .)
+## TESTING
+
+Github actions is actually set to test automatically the code but in case you want to execute the [tests](tests/) by yourself you need to have installed [pytest-cov](https://pytest-cov.readthedocs.io/en/latest/).
+Once installed you might want to use the [.coveragerc](tests/.coveragerc) included in the proyect to discard [cli.py](iceflix/cli.py)/[client.py](iceflix/client.py) files asthose tests only focus on pure command functionality.
+
+The above functionality can be achieved with: `pytest --cov-config .coveragerc --cov iceflix`
+
+## DOCKER
+
+This should allow you to execute the client in a docker environment
 
 To create the docker container:
   1. sudo docker build --tag {container_name}:{container_tag} .
   2. sudo docker run -it {container_name}:{container_tag}
 
-*zeroc-ice wheel may freeze for 5 or more minutes when building 
+**zeroc-ice wheel may freeze for 5 or more minutes when building**
