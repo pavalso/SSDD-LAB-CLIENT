@@ -1,5 +1,7 @@
 # Iceflix Client
 
+[https://github.com/pavalso/SSDD-LAB-CLIENT](https://github.com/pavalso/SSDD-LAB-CLIENT)
+
 Client to communicate with Iceflix microservices, in this case implemented as a CLI client.
 
 It contains the following files and directories:
@@ -46,6 +48,13 @@ To create the docker container:
   2. `sudo docker run -it {container_name}:{container_tag}`
 
 **zeroc-ice wheel may freeze for 5 or more minutes when building**
+
+## Usage
+
+Once installed, the proyect can be run using the script [run_client](./run_client).
+
+The following arguments can be passed:
+**-v**: Can be stacked up to 3 times (-vvv), increases verbosity of the program
 
 ## Testing
 
