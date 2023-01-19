@@ -35,7 +35,7 @@ To install this proyect you'll need to have installed python3.1x.
 
 ### DOCKER (optional)
 
-You'll need to install (docker)[https://docs.docker.com/engine/install/] before.
+You'll need to install [docker](https://docs.docker.com/engine/install/) before.
 
 Once installed:
 
